@@ -1,6 +1,9 @@
+#!py -3.10
 # main.py
 # Sistema de Reconocimiento y Grabación de Lenguaje de Señas (LSM)
 # Este código está diseñado para ser estudiado por estudiantes de visión por computadora.
+
+# NOTA: revisar los ultimos cambios en modulos en jules...
 
 import cv2
 import time
@@ -22,7 +25,7 @@ class HandApp:
     def __init__(self):
         # Configuración de rutas
         self.model_path = "hand_landmarker.task"
-
+        
         # Inicialización de componentes
         self.camera = CameraEngine()
         self.processor = HandProcessor(self.model_path, num_hands=2)
@@ -34,7 +37,7 @@ class HandApp:
         self.running = True
         self.show_landmarks = True
         self.only_one_hand = True  # Requerimiento: Seguir solo una mano
-
+        
         # Variables para mostrar en UI
         self.current_static_letter = "---"
         self.manual_letter = None # Letra seleccionada manualmente con el teclado
@@ -52,14 +55,14 @@ class HandApp:
 
                 # 2. Procesar mano con MediaPipe (Asíncrono)
                 self.processor.detect(frame, int(time.time() * 1000))
-
+                
                 # 3. Obtener resultados del procesamiento
                 lands = self.processor.get_hand_landmarks(0) # Tomamos la primera mano detectada
-
+                
                 if lands:
                     # Extraer propiedades para reconocimiento
                     props = self.logic.extract_properties(lands, self.processor)
-
+                    
                     # Reconocer letra estática actual
                     detected = self.logic.recognize_static(props)
                     self.current_static_letter = detected if detected else "---"
@@ -67,7 +70,7 @@ class HandApp:
                     # Lógica de Seguimiento Automático (Triggers)
                     # Si la letra detectada tiene un mapeo de movimiento, activamos seguimiento
                     motion_target, fingers_to_track = self.logic.get_trigger_info(self.current_static_letter)
-
+                    
                     if motion_target:
                         self.target_motion_letter = motion_target
                         self.tracker.set_active_fingers(fingers_to_track)
@@ -88,7 +91,8 @@ class HandApp:
                             "landmarks": [{"x": l.x, "y": l.y, "z": l.z} for l in lands],
                             "direction": props["direction"],
                             "rotation": props["rotation"],
-                            "tracked_fingers": self.tracker.active_fingers
+                            "tracked_fingers": self.tracker.active_fingers,
+                            "props": props
                         }
                         self.recorder.add_frame(record_data)
 
@@ -114,10 +118,10 @@ class HandApp:
     def _handle_keys(self):
         """Gestiona las pulsaciones de teclas para grabación y control."""
         key = cv2.waitKey(1) & 0xFF
-
+        
         if key == ord('q'):
             self.running = False
-
+        
         # Selección manual de letra (a-z)
         if ord('a') <= key <= ord('z'):
             self.manual_letter = chr(key).upper()
@@ -133,8 +137,8 @@ class HandApp:
                 self.status_msg = "Error: Selecciona una letra con el teclado primero."
 
         # F12: Grabar movimiento (activado por los triggers)
-        # Nota: cv2.waitKey puede no capturar F12 igual en todos los sistemas.
-        # F12 suele ser 255 en algunos contextos o requiere otras librerías.
+        # Nota: cv2.waitKey puede no capturar F12 igual en todos los sistemas. 
+        # F12 suele ser 255 en algunos contextos o requiere otras librerías. 
         # En OpenCV común, F12 puede ser un código específico. Usaremos 123 (F12) o similar.
         # Intentaremos detectar F12 (comúnmente 123 en Linux/Windows con OpenCV)
         elif key == 123 or key == 122: # F12 o F11 como respaldo
@@ -162,25 +166,25 @@ class HandApp:
     def _draw_hud(self, frame):
         """Dibuja la información en pantalla para el usuario."""
         y = 30
-        cv2.putText(frame, f"Letra Detectada: {self.current_static_letter}", (10, y),
+        cv2.putText(frame, f"Letra Detectada: {self.current_static_letter}", (10, y), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-
+        
         y += 30
         manual = self.manual_letter if self.manual_letter else "Ninguna"
-        cv2.putText(frame, f"Letra Manual (Teclado): {manual}", (10, y),
+        cv2.putText(frame, f"Letra Manual (Teclado): {manual}", (10, y), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         y += 30
         target = self.target_motion_letter if self.target_motion_letter else "Ninguno"
-        cv2.putText(frame, f"Grabacion Pendiente (F12): {target}", (10, y),
+        cv2.putText(frame, f"Grabacion Pendiente (F12): {target}", (10, y), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
 
         if self.recorder.recording:
             rem = self.recorder.get_remaining_time()
-            cv2.putText(frame, f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s", (10, y + 60),
+            cv2.putText(frame, f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s", (10, y + 60), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 3)
 
-        cv2.putText(frame, self.status_msg, (10, frame.shape[0] - 20),
+        cv2.putText(frame, self.status_msg, (10, frame.shape[0] - 20), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
 if __name__ == "__main__":

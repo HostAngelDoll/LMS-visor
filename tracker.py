@@ -31,7 +31,7 @@ class HandTracker:
     def update(self, hand_landmarks, frame_shape, hand_idx=0):
         """Actualiza las posiciones de los dedos activos."""
         h, w = frame_shape[:2]
-
+        
         if hand_idx not in self.histories:
             self.histories[hand_idx] = {fid: deque(maxlen=self.max_len) for fid in self.FINGER_COLORS}
 
@@ -53,14 +53,14 @@ class HandTracker:
             for fid, pts in fingers.items():
                 if len(pts) < 2:
                     continue
-
+                
                 color = self.FINGER_COLORS[fid]
                 n = len(pts)
                 for i in range(n - 1):
                     # Efecto de desvanecimiento
                     thickness = int(1 + 10 * (i / n))
                     cv2.line(overlay, pts[i], pts[i+1], color, thickness, lineType=cv2.LINE_AA)
-
+        
         cv2.addWeighted(overlay, self.background_alpha, frame, 1 - self.background_alpha, 0, frame)
 
     def clear_all(self):
