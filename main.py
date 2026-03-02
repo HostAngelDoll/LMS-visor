@@ -64,7 +64,7 @@ class HandApp:
                     props = self.logic.extract_properties(lands, self.processor)
                     
                     # Reconocer letra estática actual
-                    detected = self.logic.recognize_static(props)
+                    detected = self.logic.recognize_static(props, lands)
                     self.current_static_letter = detected if detected else "---"
 
                     # Lógica de Seguimiento Automático (Triggers)
