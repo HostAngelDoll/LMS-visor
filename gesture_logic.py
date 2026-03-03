@@ -67,22 +67,22 @@ class GestureLogic:
     def recognize_static(self, hand_props, lands=None):
         """
         Reconoce la letra estática usando MLP (prioridad) o heurísticas (fallback).
+        Retorna (Letra, Origen)
         """
         # 1. Intentar con MLP si el modelo está cargado y tenemos los landmarks
         if self.model and lands:
             mlp_res, confidence = self._recognize_mlp(lands)
             if mlp_res and confidence >= self.mlp_threshold:
-                # print(f"MLP: {mlp_res} ({confidence:.2f})")
-                return mlp_res
+                return mlp_res, f"MLP ({confidence:.2f})"
 
         # 2. Intentar por heurística (Reglas rápidas)
         heuristic_res = self._recognize_heuristic(hand_props)
         if heuristic_res:
-            return heuristic_res
+            return heuristic_res, "Heurística"
 
         # 3. Intentar por comparación con base de datos JSON (Estadístico antiguo)
         if not self.gestures_db:
-            return None
+            return None, None
 
         best_letter = None
         best_score = 1e9
@@ -97,8 +97,9 @@ class GestureLogic:
                     best_letter = letter
 
         if best_score < self.threshold:
-            return best_letter
-        return None
+            return best_letter, "Base de Datos"
+
+        return None, None
 
     def _recognize_mlp(self, lands):
         """Realiza la inferencia con el modelo MLP."""
@@ -130,9 +131,11 @@ class GestureLogic:
         d_th_idx = hand_props["d_thumb_index"]
         curls = hand_props["curls"]
 
-        # Letra B
-        if st["index"] and st["middle"] and st["ring"] and st["pinky"] and not st["thumb"]:
-            return "B"
+        # Letra B: 4 dedos extendidos. El pulgar puede estar frente a la palma (no extendido).
+        if st["index"] and st["middle"] and st["ring"] and st["pinky"]:
+            # Si el pulgar NO está extendido o está cerca del índice, es probable que sea B
+            if not st["thumb"] or d_th_idx < 0.3:
+                return "B"
         # Letra D
         if st["index"] and not st["middle"] and not st["ring"] and not st["pinky"] and not hand_props["thumb_left"]:
             return "D"

@@ -79,10 +79,15 @@ class GestureRecorder:
         if not self.recording: return
 
         self.recording = False
-        if not self.buffer:
-            print("Grabación cancelada: No se capturaron frames.")
+
+        # Filtrar frames que no tengan landmarks válidos antes de guardar
+        valid_buffer = [f for f in self.buffer if f["data"].get("landmarks")]
+
+        if len(valid_buffer) < 5:
+            print(f"Grabación cancelada: Insuficientes frames válidos ({len(valid_buffer)}). Asegúrate de que la mano sea visible.")
             return
 
+        self.buffer = valid_buffer
         path = self.motion_path if self.is_motion else self.static_path
         
         # Cargar datos existentes con manejo de errores robusto

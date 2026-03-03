@@ -25,10 +25,11 @@ class GestureDataset(Dataset):
 
         for letter, info in data.items():
             samples_list = info.get("samples", [])
+            letter_samples_count = 0
             for sample in samples_list:
                 frames = sample.get("frames", [])
-                # Descartar primeros 2 frames si la grabación es corta (>10 frames)
-                start_idx = 2 if len(frames) > 10 else 0
+                # Descartar primeros 2 frames para estabilidad si la grabación es larga
+                start_idx = 3 if len(frames) > 15 else (1 if len(frames) > 5 else 0)
                 for frame in frames[start_idx:]:
                     landmarks = frame.get("data", {}).get("landmarks", [])
                     if len(landmarks) == 21:
@@ -36,8 +37,10 @@ class GestureDataset(Dataset):
                         normalized = self.normalize_landmarks(landmarks)
                         self.samples.append(normalized)
                         self.labels.append(self.class_to_idx[letter])
+                        letter_samples_count += 1
+            print(f"  Letra '{letter}': {letter_samples_count} muestras de landmarks.")
 
-        self.samples = torch.FloatTensor(self.samples)
+        self.samples = torch.FloatTensor(np.array(self.samples))
         self.labels = torch.LongTensor(self.labels)
         print(f"Dataset cargado: {len(self.samples)} muestras, {len(self.classes)} clases.")
 
