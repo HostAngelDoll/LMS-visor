@@ -130,6 +130,9 @@ class GestureLogic:
         d_th_idx = hand_props["d_thumb_index"]
         curls = hand_props["curls"]
 
+        # Letra B
+        if st["index"] and st["middle"] and st["ring"] and st["pinky"] and not st["thumb"]:
+            return "B"
         # Letra D
         if st["index"] and not st["middle"] and not st["ring"] and not st["pinky"] and not hand_props["thumb_left"]:
             return "D"
@@ -158,7 +161,7 @@ class GestureLogic:
         if not agg: return 1.0
 
         diff = 0
-        keys = ["index", "middle", "ring", "pinky"]
+        keys = ["thumb", "index", "middle", "ring", "pinky"]
         for k in keys:
             current = 1 if props["states"].get(k, False) else 0
             expected = agg.get(f"prop_{k}_ext", agg.get(f"prop_{k[:3]}_ext", 0.5))

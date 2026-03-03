@@ -66,7 +66,7 @@ class GestureRecorder:
                 agg[f"avg_{k}"] = sum(vals) / len(vals)
 
         # Proporciones booleanas (cuánto tiempo estuvo el dedo extendido)
-        bool_keys = ["index", "middle", "ring", "pinky"]
+        bool_keys = ["thumb", "index", "middle", "ring", "pinky"]
         for k in bool_keys:
             vals = [1 if p["states"].get(k, False) else 0 for p in all_props if "states" in p]
             if vals:
