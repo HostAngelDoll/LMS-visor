@@ -27,8 +27,9 @@ class GestureDataset(Dataset):
             samples_list = info.get("samples", [])
             for sample in samples_list:
                 frames = sample.get("frames", [])
-                # Descartar primeros 3 frames para estabilidad
-                for frame in frames[3:]:
+                # Descartar primeros 2 frames si la grabación es corta (>10 frames)
+                start_idx = 2 if len(frames) > 10 else 0
+                for frame in frames[start_idx:]:
                     landmarks = frame.get("data", {}).get("landmarks", [])
                     if len(landmarks) == 21:
                         # Normalización

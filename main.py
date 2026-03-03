@@ -100,7 +100,10 @@ class HandApp:
                     if self.show_landmarks:
                         self._draw_hand_landmarks(frame, lands)
 
-                # 4. Dibujar estelas (pincel)
+                # 4. Actualizar estado del grabador (Verificar tiempos y guardado)
+                self.recorder.update()
+
+                # 5. Dibujar estelas (pincel)
                 self.tracker.draw_trails(frame)
 
                 # 5. Dibujar interfaz de usuario (HUD)
@@ -127,12 +130,12 @@ class HandApp:
             self.manual_letter = chr(key).upper()
             self.status_msg = f"Letra manual establecida: {self.manual_letter}"
 
-        # Enter: Grabar gesto estático
+        # Enter: Grabar gesto estático (1.5 segundos)
         elif key in (13, 10):
             # Prioridad a la letra manual, si no a la detectada
             letter_to_save = self.manual_letter or (self.current_static_letter if self.current_static_letter != "---" else None)
             if letter_to_save:
-                self.recorder.start_recording(letter_to_save, is_motion=False)
+                self.recorder.start_recording(letter_to_save, is_motion=False, duration=1.5)
             else:
                 self.status_msg = "Error: Selecciona una letra con el teclado primero."
 
