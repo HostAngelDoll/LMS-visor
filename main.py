@@ -6,8 +6,8 @@ import numpy as np
 import threading
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
-                             QStatusBar, QFrame, QGroupBox)
-from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize
+                             QStatusBar, QFrame, QGroupBox, QTextEdit)
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime
 from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent
 
 # Importación de nuestros módulos personalizados
@@ -17,6 +17,33 @@ from gesture_logic import GestureLogic
 from tracker import HandTracker
 from recorder import GestureRecorder
 from training.train_static import train
+
+class LogWidget(QTextEdit):
+    """Widget de logs con soporte para colores y fondo negro."""
+    def __init__(self):
+        super().__init__()
+        self.setReadOnly(True)
+        self.setStyleSheet("""
+            background-color: black;
+            color: white;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            border: 1px solid #444;
+        """)
+
+    def append_log(self, message, mode="info"):
+        """Añade un mensaje al log con el color correspondiente."""
+        timestamp = QDateTime.currentDateTime().toString("hh:mm:ss")
+        color = "white"
+        if mode == "success": color = "#00FF00" # Verde
+        elif mode == "warning": color = "#FFFF00" # Amarillo
+        elif mode == "error": color = "#FF0000" # Rojo
+
+        html_msg = f"<span style='color: #888;'>[{timestamp}]</span> "
+        html_msg += f"<span style='color: {color};'>{message}</span>"
+        self.append(html_msg)
+        # Auto-scroll al final
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
 class TrainingThread(QThread):
     progress = pyqtSignal(str)
@@ -41,7 +68,8 @@ class HandAppQT(QMainWindow):
         self.processor = HandProcessor(self.model_path, num_hands=2)
         self.logic = GestureLogic()
         self.tracker = HandTracker()
-        self.recorder = GestureRecorder()
+        self._init_ui() # Inicializar UI antes para tener el log_widget
+        self.recorder = GestureRecorder(log_callback=self.log_widget.append_log)
 
         # Estado
         self.running_camera = False
@@ -51,8 +79,6 @@ class HandAppQT(QMainWindow):
         self.target_motion_letter = None
         self.last_timestamp_ms = -1
         self.start_time_ns = time.perf_counter_ns()
-
-        self._init_ui()
 
         # Timer para el loop principal (aprox 30 FPS)
         self.timer = QTimer()
@@ -65,20 +91,28 @@ class HandAppQT(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
 
-        # --- PANEL IZQUIERDO: Video ---
-        video_container = QVBoxLayout()
+        # --- PANEL IZQUIERDO: Video y Logs ---
+        left_container = QVBoxLayout()
+
+        # Área de Video
         self.video_label = QLabel("Cámara Desconectada")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("background-color: black; color: white; border: 2px solid #333;")
         self.video_label.setMinimumSize(640, 480)
-        video_container.addWidget(self.video_label)
+        left_container.addWidget(self.video_label, stretch=4)
+
+        # Área de Logs
+        self.log_widget = LogWidget()
+        self.log_widget.setMaximumHeight(200)
+        left_container.addWidget(QLabel("Logs del Sistema:"))
+        left_container.addWidget(self.log_widget, stretch=1)
 
         # Status Bar inferior para mensajes rápidos
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Listo")
 
-        main_layout.addLayout(video_container, stretch=3)
+        main_layout.addLayout(left_container, stretch=3)
 
         # --- PANEL DERECHO: Controles ---
         sidebar = QVBoxLayout()
@@ -163,6 +197,7 @@ class HandAppQT(QMainWindow):
                 self.btn_cam.setText("Desconectar Cámara")
                 self.combo_cam_source.setEnabled(False)
                 self.status_bar.showMessage(f"Cámara {mode} conectada")
+                self.log_widget.append_log(f"Cámara {mode} conectada correctamente.", "success")
                 # Resetear procesador para evitar estados antiguos
                 self.processor.reset()
                 self.tracker.clear_all()
@@ -176,6 +211,7 @@ class HandAppQT(QMainWindow):
             self.video_label.clear()
             self.video_label.setText("Cámara Desconectada")
             self.status_bar.showMessage("Cámara desconectada")
+            self.log_widget.append_log("Cámara desconectada.", "warning")
             self.current_static_letter = "---"
             self.recognition_source = "---"
             self.lbl_letter.setText("Letra: ---")
@@ -276,9 +312,11 @@ class HandAppQT(QMainWindow):
     def record_static(self):
         letter = self.manual_letter or (self.current_static_letter if self.current_static_letter != "---" else None)
         if letter:
+            self.log_widget.append_log(f"Iniciando grabación estática para letra '{letter}'...")
             self.recorder.start_recording(letter, is_motion=False, duration=1.5)
         else:
             self.status_bar.showMessage("Selecciona una letra primero")
+            self.log_widget.append_log("Error: Intento de grabación sin letra seleccionada.", "error")
 
     def record_motion(self):
         if self.target_motion_letter:
@@ -289,15 +327,22 @@ class HandAppQT(QMainWindow):
     def start_training(self):
         self.btn_train.setEnabled(False)
         self.train_progress_lbl.setText("Entrenando...")
+        self.log_widget.append_log("Iniciando entrenamiento del modelo MLP...", "info")
         self.thread = TrainingThread()
-        self.thread.progress.connect(lambda msg: self.train_progress_lbl.setText(msg))
+        self.thread.progress.connect(self.on_training_progress)
         self.thread.finished.connect(self.on_training_finished)
         self.thread.start()
+
+    def on_training_progress(self, msg):
+        self.train_progress_lbl.setText(msg)
+        # Evitar saturar el log si el mensaje es muy frecuente, pero aquí son epochs
+        self.log_widget.append_log(msg, "info")
 
     def on_training_finished(self, success, msg):
         self.btn_train.setEnabled(True)
         self.train_progress_lbl.setText(msg)
         self.status_bar.showMessage(msg)
+        self.log_widget.append_log(msg, "success" if success else "error")
 
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
