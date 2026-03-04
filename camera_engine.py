@@ -38,28 +38,34 @@ class CameraEngine:
         cam_rgb.preview.link(xout_rgb.input)
         return pipeline
 
-    def start(self):
-        """Intenta iniciar la cámara OAK-D, si falla, usa la webcam."""
+    def start(self, mode="OAK-D"):
+        """
+        Inicia la cámara seleccionada.
+        mode: "OAK-D" o "Webcam"
+        """
         if self.is_running: return True
 
-        try:
-            pipeline = self._setup_oak_pipeline()
-            self.device = dai.Device(pipeline)
-            self.q_rgb = self.device.getOutputQueue("rgb", maxSize=4, blocking=False)
-            self.is_oak = True
-            self.is_running = True
-            print("Cámara OAK-D iniciada correctamente.")
-            return True
-        except Exception as e:
-            print(f"No se pudo iniciar OAK-D: {e}. Intentando webcam...")
+        if mode == "OAK-D":
+            try:
+                pipeline = self._setup_oak_pipeline()
+                self.device = dai.Device(pipeline)
+                self.q_rgb = self.device.getOutputQueue("rgb", maxSize=4, blocking=False)
+                self.is_oak = True
+                self.is_running = True
+                print("Cámara OAK-D iniciada correctamente.")
+                return True
+            except Exception as e:
+                print(f"No se pudo iniciar OAK-D: {e}")
+                return False
+        else:
             self.cap_webcam = cv2.VideoCapture(0)
             if self.cap_webcam.isOpened():
                 self.is_oak = False
                 self.is_running = True
-                print("Webcam iniciada como respaldo.")
+                print("Webcam iniciada correctamente.")
                 return True
             else:
-                print("Error: No se encontró ninguna cámara disponible.")
+                print("Error: No se pudo abrir la webcam.")
                 self.cap_webcam = None
                 return False
 

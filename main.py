@@ -86,6 +86,12 @@ class HandAppQT(QMainWindow):
         # Grupo de Cámara
         cam_group = QGroupBox("Control de Cámara")
         cam_layout = QVBoxLayout()
+
+        cam_layout.addWidget(QLabel("Seleccionar Fuente:"))
+        self.combo_cam_source = QComboBox()
+        self.combo_cam_source.addItems(["OAK-D", "Webcam"])
+        cam_layout.addWidget(self.combo_cam_source)
+
         self.btn_cam = QPushButton("Conectar Cámara")
         self.btn_cam.setFixedHeight(40)
         self.btn_cam.clicked.connect(self.toggle_camera)
@@ -151,10 +157,12 @@ class HandAppQT(QMainWindow):
 
     def toggle_camera(self):
         if not self.running_camera:
-            if self.camera.start():
+            mode = self.combo_cam_source.currentText()
+            if self.camera.start(mode=mode):
                 self.running_camera = True
                 self.btn_cam.setText("Desconectar Cámara")
-                self.status_bar.showMessage("Cámara conectada")
+                self.combo_cam_source.setEnabled(False)
+                self.status_bar.showMessage(f"Cámara {mode} conectada")
                 # Resetear procesador para evitar estados antiguos
                 self.processor.reset()
                 self.tracker.clear_all()
@@ -164,6 +172,7 @@ class HandAppQT(QMainWindow):
             self.camera.stop()
             self.running_camera = False
             self.btn_cam.setText("Conectar Cámara")
+            self.combo_cam_source.setEnabled(True)
             self.video_label.clear()
             self.video_label.setText("Cámara Desconectada")
             self.status_bar.showMessage("Cámara desconectada")
