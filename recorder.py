@@ -7,7 +7,7 @@ import os
 
 class GestureRecorder:
     """
-    Maneja la lógica de grabación temporizada (5 segundos).
+    Maneja la lógica de grabación temporizada.
     Permite guardar gestos estáticos y gestos con movimiento en archivos JSON separados.
     """
     def __init__(self, static_path="gestures.json", motion_path="motion_gestures.json"):
@@ -20,23 +20,32 @@ class GestureRecorder:
         self.current_letter = ""
         self.is_motion = False
 
-    def start_recording(self, letter, is_motion=False):
+    def start_recording(self, letter, is_motion=False, duration=None):
         """Inicia el proceso de grabación."""
+        if self.recording:
+            return # Evitar reinicio si ya está grabando
+
         self.recording = True
         self.start_time = time.time()
         self.current_letter = letter
         self.is_motion = is_motion
+        # Duración por defecto: 5s para movimiento, 1.5s para estático
+        self.duration = duration if duration is not None else (5.0 if is_motion else 1.5)
         self.buffer = []
-        print(f"Grabando {'MOVIMIENTO' if is_motion else 'ESTÁTICO'} para letra: {letter}")
+        print(f"Iniciando grabación {'MOVIMIENTO' if is_motion else 'ESTÁTICA'} para letra: {letter} ({self.duration}s)")
 
     def add_frame(self, data):
-        """Añade datos del frame actual al buffer de grabación."""
+        """Añade datos del frame actual al buffer de grabación si estamos grabando."""
         if self.recording:
             self.buffer.append({
                 "timestamp": time.time() - self.start_time,
                 "data": data
             })
-            
+            # El control de parada ahora se delega a update() para ser independiente de si hay detección
+
+    def update(self):
+        """Verifica el tiempo y finaliza la grabación si se cumple la duración."""
+        if self.recording:
             if time.time() - self.start_time >= self.duration:
                 self.stop_and_save()
 
@@ -44,8 +53,7 @@ class GestureRecorder:
         """Calcula promedios y proporciones de las propiedades grabadas."""
         if not self.buffer: return {}
         
-        num_frames = len(self.buffer)
-        # Extraer todas las props
+        # Extraer todas las props de los frames grabados
         all_props = [f["data"]["props"] for f in self.buffer if "props" in f["data"]]
         if not all_props: return {}
 
@@ -57,10 +65,10 @@ class GestureRecorder:
             if vals:
                 agg[f"avg_{k}"] = sum(vals) / len(vals)
 
-        # Proporciones booleanas
-        bool_keys = ["index", "middle", "ring", "pinky"]
+        # Proporciones booleanas (cuánto tiempo estuvo el dedo extendido)
+        bool_keys = ["thumb", "index", "middle", "ring", "pinky"]
         for k in bool_keys:
-            vals = [1 if p["states"][k] else 0 for p in all_props if "states" in p and k in p["states"]]
+            vals = [1 if p["states"].get(k, False) else 0 for p in all_props if "states" in p]
             if vals:
                 agg[f"prop_{k}_ext"] = sum(vals) / len(vals)
         
@@ -68,22 +76,36 @@ class GestureRecorder:
 
     def stop_and_save(self):
         """Finaliza la grabación y guarda en el archivo correspondiente."""
+        if not self.recording: return
+
         self.recording = False
+
+        # Filtrar frames que no tengan landmarks válidos antes de guardar
+        valid_buffer = [f for f in self.buffer if f["data"].get("landmarks")]
+
+        if len(valid_buffer) < 5:
+            print(f"Grabación cancelada: Insuficientes frames válidos ({len(valid_buffer)}). Asegúrate de que la mano sea visible.")
+            return
+
+        self.buffer = valid_buffer
         path = self.motion_path if self.is_motion else self.static_path
         
-        # Cargar datos existentes
+        # Cargar datos existentes con manejo de errores robusto
         data_all = {}
         if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                try:
-                    data_all = json.load(f)
-                except:
-                    data_all = {}
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:
+                        data_all = json.loads(content)
+            except Exception as e:
+                print(f"Error al cargar DB existente ({path}): {e}. Se creará un nuevo archivo.")
+                data_all = {}
 
         if self.current_letter not in data_all:
             data_all[self.current_letter] = {"samples": []}
         
-        # Manejar compatibilidad si por algún motivo es una lista (formato muy antiguo)
+        # Compatibilidad con formatos antiguos
         if isinstance(data_all[self.current_letter], list):
             data_all[self.current_letter] = {"samples": data_all[self.current_letter]}
 
@@ -95,10 +117,12 @@ class GestureRecorder:
         }
         data_all[self.current_letter]["samples"].append(sample)
 
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data_all, f, indent=2, ensure_ascii=False)
-            
-        print(f"Grabación guardada en {path} ({len(self.buffer)} frames)")
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data_all, f, indent=2, ensure_ascii=False)
+            print(f"Éxito: {len(self.buffer)} frames guardados para '{self.current_letter}' en {path}")
+        except Exception as e:
+            print(f"Error fatal al guardar en {path}: {e}")
 
     def get_remaining_time(self):
         """Retorna el tiempo restante de grabación."""

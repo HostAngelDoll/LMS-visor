@@ -2,13 +2,18 @@
 # Lógica para reconocer gestos estáticos y determinar disparadores de movimiento.
 
 import math
+import torch
+import numpy as np
+import os
+import json
+from models.model_def import StaticGestureMLP
 
 class GestureLogic:
     """
     Contiene la lógica de reconocimiento de letras del alfabeto dactilológico
     y el mapeo para las grabaciones automáticas de movimiento.
     """
-    
+
     # Mapeo de gestos estáticos que disparan seguimiento automático
     # Gesto estático -> (Letra a grabar, [Índices de dedos a seguir])
     TRIGGER_MAP = {
@@ -20,15 +25,19 @@ class GestureLogic:
         "D": ("Z", [8]),        # Seguir índice para Z
     }
 
-    def __init__(self, gestures_db_path="gestures.json"):
+    def __init__(self, gestures_db_path="gestures.json", model_dir="models"):
         self.gestures_db_path = gestures_db_path
         self.gestures_db = self._load_db()
-        self.threshold = 0.35 # Umbral de confianza
+        self.threshold = 0.35 # Umbral de confianza para heurística/DB
+        self.mlp_threshold = 0.75 # Umbral de confianza para MLP
+
+        # Cargar modelo MLP
+        self.model = None
+        self.class_mapping = {}
+        self._load_mlp(model_dir)
 
     def _load_db(self):
         """Carga la base de datos de gestos desde el archivo JSON."""
-        import json
-        import os
         if os.path.exists(self.gestures_db_path):
             try:
                 with open(self.gestures_db_path, "r", encoding="utf-8") as f:
@@ -37,24 +46,47 @@ class GestureLogic:
                 return {}
         return {}
 
-    def recognize_static(self, hand_props):
+    def _load_mlp(self, model_dir):
+        """Carga el modelo PyTorch y el mapeo de clases si existen."""
+        model_path = os.path.join(model_dir, "static_model.pt")
+        mapping_path = os.path.join(model_dir, "class_mapping.json")
+
+        if os.path.exists(model_path) and os.path.exists(mapping_path):
+            try:
+                with open(mapping_path, "r", encoding="utf-8") as f:
+                    self.class_mapping = json.load(f)
+
+                num_classes = len(self.class_mapping)
+                self.model = StaticGestureMLP(num_classes=num_classes)
+                self.model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+                self.model.eval()
+                print(f"MLP cargado correctamente con {num_classes} clases.")
+            except Exception as e:
+                print(f"Error al cargar el MLP: {e}")
+
+    def recognize_static(self, hand_props, lands=None):
         """
-        Reconoce la letra estática comparando con la DB y aplicando heurísticas.
+        Reconoce la letra estática usando MLP (prioridad) o heurísticas (fallback).
+        Retorna (Letra, Origen)
         """
-        # 1. Intentar por heurística (Reglas rápidas)
+        # 1. Intentar con MLP si el modelo está cargado y tenemos los landmarks
+        if self.model and lands:
+            mlp_res, confidence = self._recognize_mlp(lands)
+            if mlp_res and confidence >= self.mlp_threshold:
+                return mlp_res, f"MLP ({confidence:.2f})"
+
+        # 2. Intentar por heurística (Reglas rápidas)
         heuristic_res = self._recognize_heuristic(hand_props)
         if heuristic_res:
-            return heuristic_res
-            
-        # 2. Intentar por comparación con base de datos JSON
+            return heuristic_res, "Heurística"
+
+        # 3. Intentar por comparación con base de datos JSON (Estadístico antiguo)
         if not self.gestures_db:
-            return None
-            
+            return None, None
+
         best_letter = None
         best_score = 1e9
-        
-        # Simplificación de la lógica de comparación del main.py original
-        # Comparamos estados de dedos y distancias normalizadas
+
         for letter, info in self.gestures_db.items():
             samples = info.get("samples", []) if isinstance(info, dict) else []
             for samp in samples:
@@ -63,18 +95,47 @@ class GestureLogic:
                 if score < best_score:
                     best_score = score
                     best_letter = letter
-        
+
         if best_score < self.threshold:
-            return best_letter
-        return None
+            return best_letter, "Base de Datos"
+
+        return None, None
+
+    def _recognize_mlp(self, lands):
+        """Realiza la inferencia con el modelo MLP."""
+        try:
+            # Normalización idéntica al entrenamiento
+            lms = np.array([[lm.x, lm.y, lm.z] for lm in lands])
+            base = lms[0]
+            lms = lms - base
+            palm_size = np.linalg.norm(lms[9])
+            if palm_size > 0:
+                lms = lms / palm_size
+
+            input_tensor = torch.FloatTensor(lms.flatten()).unsqueeze(0)
+
+            with torch.no_grad():
+                outputs = self.model(input_tensor)
+                probabilities = torch.softmax(outputs, dim=1)
+                confidence, predicted_idx = torch.max(probabilities, 1)
+
+                label_idx = str(predicted_idx.item())
+                return self.class_mapping.get(label_idx), confidence.item()
+        except Exception as e:
+            print(f"Error en inferencia MLP: {e}")
+            return None, 0.0
 
     def _recognize_heuristic(self, hand_props):
         """Reglas lógicas para algunas letras básicas."""
         st = hand_props["states"]
         d_th_idx = hand_props["d_thumb_index"]
-        d_idx_mid = hand_props["d_index_middle"]
         curls = hand_props["curls"]
-        
+
+        # Letra B: 4 dedos extendidos. El pulgar puede estar frente a la palma (no extendido).
+        if st["index"] and st["middle"] and st["ring"] and st["pinky"]:
+            # Si el pulgar NO está extendido o está cerca del índice, es probable que sea B
+            if not st["thumb"] or d_th_idx < 0.3:
+                return "B"
         # Letra D
         if st["index"] and not st["middle"] and not st["ring"] and not st["pinky"] and not hand_props["thumb_left"]:
             return "D"
@@ -87,40 +148,35 @@ class GestureLogic:
         # Letra P (Aproximación)
         if st["index"] and st["middle"] and not st["ring"] and not st["pinky"] and hand_props["rotation"] > 130:
             return "P"
-        
+
         # Letra C vs E (Basado en la apertura y curvatura)
-        # La 'C' tiene una apertura clara entre pulgar e índice
         is_curled_all = all(curls[f] < 130 for f in ["index", "middle", "ring", "pinky"])
         if is_curled_all:
             if d_th_idx > 0.45:
                 return "C"
             elif d_th_idx < 0.35:
                 return "E"
-            
+
         return None
 
     def _compute_score(self, props, agg):
         """Calcula una puntuación de diferencia entre las propiedades actuales y una muestra."""
-        if not agg: return 1.0 # Si no hay agregados, penalización máxima
+        if not agg: return 1.0
 
         diff = 0
-        # Comparar estados de dedos (Booleanos)
-        # Soportar tanto formato nuevo (prop_index_ext) como antiguo (prop_idx_ext)
-        keys = ["index", "middle", "ring", "pinky"]
+        keys = ["thumb", "index", "middle", "ring", "pinky"]
         for k in keys:
             current = 1 if props["states"].get(k, False) else 0
-            # Intentar varias combinaciones de nombres de llaves comunes
             expected = agg.get(f"prop_{k}_ext", agg.get(f"prop_{k[:3]}_ext", 0.5))
             diff += abs(current - expected)
-            
-        # Comparar distancias (Numéricas)
+
         d_keys = ["d_thumb_index", "d_thumb_middle", "d_index_middle"]
         for k in d_keys:
             if k in props:
                 current = props[k]
                 avg_val = agg.get(f"avg_{k}", 0.5)
                 diff += abs(current - avg_val) * 0.5
-            
+
         return diff / (len(keys) + len(d_keys))
 
     def get_trigger_info(self, static_letter):
@@ -138,7 +194,7 @@ class GestureLogic:
             "d_thumb_index": processor.distance(lands[4], lands[8]) / hand_s,
             "d_thumb_middle": processor.distance(lands[4], lands[12]) / hand_s,
             "d_index_middle": processor.distance(lands[8], lands[12]) / hand_s,
-            "thumb_left": lands[4].x < lands[8].x, # Simplificado para mano derecha
+            "thumb_left": lands[4].x < lands[8].x,
             "direction": processor.get_hand_direction(lands),
             "rotation": processor.get_hand_rotation(lands)
         }

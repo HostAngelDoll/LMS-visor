@@ -40,6 +40,7 @@ class HandApp:
         
         # Variables para mostrar en UI
         self.current_static_letter = "---"
+        self.recognition_source = "---"
         self.manual_letter = None # Letra seleccionada manualmente con el teclado
         self.target_motion_letter = None
         self.status_msg = "Listo"
@@ -48,13 +49,21 @@ class HandApp:
         """Bucle principal de ejecución."""
         with self.camera as cam:
             frame_id = 0
+            last_timestamp_ms = -1
+            start_time_ns = time.perf_counter_ns()
             while self.running:
                 # 1. Obtener frame de la cámara
                 frame = cam.get_frame()
                 if frame is None: continue
 
                 # 2. Procesar mano con MediaPipe (Asíncrono)
-                self.processor.detect(frame, int(time.time() * 1000))
+                # MediaPipe requiere timestamps estrictamente crecientes en ms.
+                curr_ms = (time.perf_counter_ns() - start_time_ns) // 1_000_000
+                if curr_ms <= last_timestamp_ms:
+                    curr_ms = last_timestamp_ms + 1
+                last_timestamp_ms = curr_ms
+
+                self.processor.detect(frame, curr_ms)
                 
                 # 3. Obtener resultados del procesamiento
                 lands = self.processor.get_hand_landmarks(0) # Tomamos la primera mano detectada
@@ -64,8 +73,9 @@ class HandApp:
                     props = self.logic.extract_properties(lands, self.processor)
                     
                     # Reconocer letra estática actual
-                    detected = self.logic.recognize_static(props)
+                    detected, source = self.logic.recognize_static(props, lands)
                     self.current_static_letter = detected if detected else "---"
+                    self.recognition_source = source if source else "---"
 
                     # Lógica de Seguimiento Automático (Triggers)
                     # Si la letra detectada tiene un mapeo de movimiento, activamos seguimiento
@@ -100,7 +110,10 @@ class HandApp:
                     if self.show_landmarks:
                         self._draw_hand_landmarks(frame, lands)
 
-                # 4. Dibujar estelas (pincel)
+                # 4. Actualizar estado del grabador (Verificar tiempos y guardado)
+                self.recorder.update()
+
+                # 5. Dibujar estelas (pincel)
                 self.tracker.draw_trails(frame)
 
                 # 5. Dibujar interfaz de usuario (HUD)
@@ -127,12 +140,12 @@ class HandApp:
             self.manual_letter = chr(key).upper()
             self.status_msg = f"Letra manual establecida: {self.manual_letter}"
 
-        # Enter: Grabar gesto estático
+        # Enter: Grabar gesto estático (1.5 segundos)
         elif key in (13, 10):
             # Prioridad a la letra manual, si no a la detectada
             letter_to_save = self.manual_letter or (self.current_static_letter if self.current_static_letter != "---" else None)
             if letter_to_save:
-                self.recorder.start_recording(letter_to_save, is_motion=False)
+                self.recorder.start_recording(letter_to_save, is_motion=False, duration=1.5)
             else:
                 self.status_msg = "Error: Selecciona una letra con el teclado primero."
 
@@ -166,7 +179,7 @@ class HandApp:
     def _draw_hud(self, frame):
         """Dibuja la información en pantalla para el usuario."""
         y = 30
-        cv2.putText(frame, f"Letra Detectada: {self.current_static_letter}", (10, y), 
+        cv2.putText(frame, f"Letra: {self.current_static_letter} ({self.recognition_source})", (10, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
         
         y += 30
