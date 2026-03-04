@@ -5,7 +5,18 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-from models.model_def import StaticGestureMLP
+import sys
+
+# Añadir el directorio raíz al path para permitir importaciones consistentes
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
+try:
+    from models.model_def import StaticGestureMLP
+except ImportError:
+    # Fallback si se ejecuta de forma que el import absoluto falle
+    from .model_def import StaticGestureMLP
 
 class GestureDataset(Dataset):
     def __init__(self, json_path):
@@ -66,8 +77,12 @@ class GestureDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx], self.labels[idx]
 
-def train():
-    json_path = "gestures.json"
+def train(progress_callback=None):
+    # Usar rutas absolutas basadas en la raíz del proyecto
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    json_path = os.path.join(project_root, "gestures.json")
+
+    if progress_callback: progress_callback("Cargando dataset...")
     dataset = GestureDataset(json_path)
     if len(dataset) == 0:
         print("No hay suficientes datos para entrenar.")
@@ -93,17 +108,25 @@ def train():
             total_loss += loss.item()
 
         if (epoch + 1) % 10 == 0:
-            print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(dataloader):.4f}")
+            msg = f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(dataloader):.4f}"
+            print(msg)
+            if progress_callback: progress_callback(msg)
 
     # Guardar modelo y mapeo
-    os.makedirs("models", exist_ok=True)
-    torch.save(model.state_dict(), "models/static_model.pt")
+    models_dir = os.path.join(project_root, "models")
+    os.makedirs(models_dir, exist_ok=True)
+
+    model_path = os.path.join(models_dir, "static_model.pt")
+    torch.save(model.state_dict(), model_path)
 
     mapping = {i: cls for i, cls in enumerate(dataset.classes)}
-    with open("models/class_mapping.json", "w", encoding="utf-8") as f:
+    mapping_path = os.path.join(models_dir, "class_mapping.json")
+    with open(mapping_path, "w", encoding="utf-8") as f:
         json.dump(mapping, f, indent=2)
 
-    print("Entrenamiento completado. Modelo guardado en models/")
+    msg_fin = "Entrenamiento completado. Modelo guardado."
+    print(msg_fin)
+    if progress_callback: progress_callback(msg_fin)
 
 if __name__ == "__main__":
     train()

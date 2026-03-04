@@ -9,6 +9,8 @@ import cv2
 import time
 import os
 import numpy as np
+import threading
+from training.train_static import train
 
 # Importación de nuestros módulos personalizados
 from camera_engine import CameraEngine
@@ -25,7 +27,7 @@ class HandApp:
     def __init__(self):
         # Configuración de rutas
         self.model_path = "hand_landmarker.task"
-        
+
         # Inicialización de componentes
         self.camera = CameraEngine()
         self.processor = HandProcessor(self.model_path, num_hands=2)
@@ -37,13 +39,17 @@ class HandApp:
         self.running = True
         self.show_landmarks = True
         self.only_one_hand = True  # Requerimiento: Seguir solo una mano
-        
+
         # Variables para mostrar en UI
         self.current_static_letter = "---"
         self.recognition_source = "---"
         self.manual_letter = None # Letra seleccionada manualmente con el teclado
         self.target_motion_letter = None
         self.status_msg = "Listo"
+
+        # Estado del entrenamiento
+        self.training_in_progress = False
+        self.training_status = ""
 
     def run(self):
         """Bucle principal de ejecución."""
@@ -64,14 +70,14 @@ class HandApp:
                 last_timestamp_ms = curr_ms
 
                 self.processor.detect(frame, curr_ms)
-                
+
                 # 3. Obtener resultados del procesamiento
                 lands = self.processor.get_hand_landmarks(0) # Tomamos la primera mano detectada
-                
+
                 if lands:
                     # Extraer propiedades para reconocimiento
                     props = self.logic.extract_properties(lands, self.processor)
-                    
+
                     # Reconocer letra estática actual
                     detected, source = self.logic.recognize_static(props, lands)
                     self.current_static_letter = detected if detected else "---"
@@ -80,7 +86,7 @@ class HandApp:
                     # Lógica de Seguimiento Automático (Triggers)
                     # Si la letra detectada tiene un mapeo de movimiento, activamos seguimiento
                     motion_target, fingers_to_track = self.logic.get_trigger_info(self.current_static_letter)
-                    
+
                     if motion_target:
                         self.target_motion_letter = motion_target
                         self.tracker.set_active_fingers(fingers_to_track)
@@ -131,10 +137,10 @@ class HandApp:
     def _handle_keys(self):
         """Gestiona las pulsaciones de teclas para grabación y control."""
         key = cv2.waitKey(1) & 0xFF
-        
+
         if key == ord('q'):
             self.running = False
-        
+
         # Selección manual de letra (a-z)
         if ord('a') <= key <= ord('z'):
             self.manual_letter = chr(key).upper()
@@ -149,12 +155,12 @@ class HandApp:
             else:
                 self.status_msg = "Error: Selecciona una letra con el teclado primero."
 
+        # F11: Entrenar el modelo
+        elif key == 122: # F11
+            self.start_training()
+
         # F12: Grabar movimiento (activado por los triggers)
-        # Nota: cv2.waitKey puede no capturar F12 igual en todos los sistemas. 
-        # F12 suele ser 255 en algunos contextos o requiere otras librerías. 
-        # En OpenCV común, F12 puede ser un código específico. Usaremos 123 (F12) o similar.
-        # Intentaremos detectar F12 (comúnmente 123 en Linux/Windows con OpenCV)
-        elif key == 123 or key == 122: # F12 o F11 como respaldo
+        elif key == 123: # F12
             if self.target_motion_letter:
                 self.recorder.start_recording(self.target_motion_letter, is_motion=True)
             else:
@@ -176,28 +182,58 @@ class HandApp:
         for lm in lands:
             cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 3, (0, 0, 255), -1)
 
+    def start_training(self):
+        """Inicia el entrenamiento en un hilo separado."""
+        if self.training_in_progress:
+            self.status_msg = "Entrenamiento ya en curso..."
+            return
+
+        def training_task():
+            self.training_in_progress = True
+            self.status_msg = "Entrenamiento iniciado..."
+
+            def update_status(msg):
+                self.training_status = msg
+                self.status_msg = f"Entrenando: {msg}"
+
+            try:
+                train(progress_callback=update_status)
+                self.status_msg = "¡Entrenamiento completado!"
+            except Exception as e:
+                self.status_msg = f"Error en entrenamiento: {e}"
+                print(f"Error en entrenamiento: {e}")
+            finally:
+                self.training_in_progress = False
+
+        thread = threading.Thread(target=training_task, daemon=True)
+        thread.start()
+
     def _draw_hud(self, frame):
         """Dibuja la información en pantalla para el usuario."""
         y = 30
         cv2.putText(frame, f"Letra: {self.current_static_letter} ({self.recognition_source})", (10, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        
+
         y += 30
         manual = self.manual_letter if self.manual_letter else "Ninguna"
-        cv2.putText(frame, f"Letra Manual (Teclado): {manual}", (10, y), 
+        cv2.putText(frame, f"Letra Manual (Teclado): {manual}", (10, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         y += 30
         target = self.target_motion_letter if self.target_motion_letter else "Ninguno"
-        cv2.putText(frame, f"Grabacion Pendiente (F12): {target}", (10, y), 
+        cv2.putText(frame, f"Grabacion Pendiente (F12): {target}", (10, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
 
         if self.recorder.recording:
             rem = self.recorder.get_remaining_time()
-            cv2.putText(frame, f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s", (10, y + 60), 
+            cv2.putText(frame, f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s", (10, y + 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 3)
 
-        cv2.putText(frame, self.status_msg, (10, frame.shape[0] - 20), 
+        if self.training_in_progress:
+            cv2.putText(frame, f"ENTRENANDO: {self.training_status}", (10, frame.shape[0] - 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        cv2.putText(frame, self.status_msg, (10, frame.shape[0] - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
 if __name__ == "__main__":
