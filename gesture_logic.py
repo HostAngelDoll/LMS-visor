@@ -2,11 +2,18 @@
 # Lógica para reconocer gestos estáticos y determinar disparadores de movimiento.
 
 import math
-import torch
 import numpy as np
 import os
 import json
-from models.model_def import StaticGestureMLP
+
+# Manejo de importación resiliente para PyTorch (evitar fallos por DLLs en Windows)
+try:
+    import torch
+    from models.model_def import StaticGestureMLP
+    TORCH_AVAILABLE = True
+except (ImportError, OSError) as e:
+    print(f"Advertencia: PyTorch no pudo cargarse ({e}). El reconocimiento MLP estará desactivado.")
+    TORCH_AVAILABLE = False
 
 class GestureLogic:
     """
@@ -34,7 +41,8 @@ class GestureLogic:
         # Cargar modelo MLP
         self.model = None
         self.class_mapping = {}
-        self._load_mlp(model_dir)
+        if TORCH_AVAILABLE:
+            self._load_mlp(model_dir)
 
     def _load_db(self):
         """Carga la base de datos de gestos desde el archivo JSON."""
@@ -103,6 +111,8 @@ class GestureLogic:
 
     def _recognize_mlp(self, lands):
         """Realiza la inferencia con el modelo MLP."""
+        if not TORCH_AVAILABLE:
+            return None, 0.0
         try:
             # Normalización idéntica al entrenamiento
             lms = np.array([[lm.x, lm.y, lm.z] for lm in lands])
