@@ -5,14 +5,29 @@ import math
 import numpy as np
 import os
 import json
+import sys
 
 # Manejo de importación resiliente para PyTorch (evitar fallos por DLLs en Windows)
+if sys.platform == 'win32':
+    import site
+    # Intentar añadir el directorio de DLLs de torch manualmente
+    for path in site.getsitepackages():
+        torch_lib = os.path.join(path, "torch", "lib")
+        if os.path.exists(torch_lib):
+            try:
+                os.add_dll_directory(torch_lib)
+            except (AttributeError, OSError):
+                pass
+
 try:
     import torch
     from models.model_def import StaticGestureMLP
     TORCH_AVAILABLE = True
 except (ImportError, OSError) as e:
-    print(f"Advertencia: PyTorch no pudo cargarse ({e}). El reconocimiento MLP estará desactivado.")
+    msg = f"Advertencia: PyTorch no pudo cargarse ({e})."
+    if "WinError 1114" in str(e):
+        msg += " Sugerencia: Instala el 'Microsoft Visual C++ Redistributable'."
+    print(f"{msg} El reconocimiento MLP estará desactivado.")
     TORCH_AVAILABLE = False
 
 class GestureLogic:

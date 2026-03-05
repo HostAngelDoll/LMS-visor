@@ -2,8 +2,19 @@ import json
 import os
 import numpy as np
 import sys
+import os
 
-# Manejo de importación resiliente para PyTorch
+# Manejo de importación resiliente para PyTorch (evitar fallos por DLLs en Windows)
+if sys.platform == 'win32':
+    import site
+    for path in site.getsitepackages():
+        torch_lib = os.path.join(path, "torch", "lib")
+        if os.path.exists(torch_lib):
+            try:
+                os.add_dll_directory(torch_lib)
+            except (AttributeError, OSError):
+                pass
+
 try:
     import torch
     import torch.nn as nn
@@ -11,7 +22,10 @@ try:
     from torch.utils.data import Dataset, DataLoader
     TORCH_AVAILABLE = True
 except (ImportError, OSError) as e:
-    print(f"Error fatal: PyTorch no pudo cargarse ({e}). El entrenamiento no es posible.")
+    msg = f"Error fatal: PyTorch no pudo cargarse ({e})."
+    if "WinError 1114" in str(e):
+        msg += " Sugerencia: Instala el 'Microsoft Visual C++ Redistributable'."
+    print(f"{msg} El entrenamiento no es posible.")
     TORCH_AVAILABLE = False
 
 # Añadir el directorio raíz al path para permitir importaciones consistentes
