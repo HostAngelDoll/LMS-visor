@@ -4,60 +4,103 @@
 
 import depthai as dai
 import cv2
+import time
 
 class CameraEngine:
     """
-    Esta clase se encarga de configurar y gestionar la comunicación con la cámara OAK-D.
-    Utiliza la librería depthai para crear un pipeline que captura video en color.
+    Esta clase se encarga de gestionar la captura de video, priorizando la cámara OAK-D
+    pero con soporte para webcam estándar como respaldo (fallback).
     """
     def __init__(self, width=640, height=480, fps=30):
         self.width = width
         self.height = height
         self.fps = fps
-        self.pipeline = dai.Pipeline()
-        self._setup_pipeline()
+
+        # Estado
         self.device = None
         self.q_rgb = None
+        self.cap_webcam = None
+        self.is_oak = False
+        self.is_running = False
 
-    def _setup_pipeline(self):
-        """Configura los nodos de la cámara y la salida hacia el host (computadora)."""
+    def _setup_oak_pipeline(self):
+        pipeline = dai.Pipeline()
         # Crear nodo de cámara de color
-        self.cam_rgb = self.pipeline.create(dai.node.ColorCamera)
-        self.cam_rgb.setPreviewSize(self.width, self.height)
-        self.cam_rgb.setInterleaved(False)
-        self.cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
-        self.cam_rgb.setFps(self.fps)
+        cam_rgb = pipeline.create(dai.node.ColorCamera)
+        cam_rgb.setPreviewSize(self.width, self.height)
+        cam_rgb.setInterleaved(False)
+        cam_rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+        cam_rgb.setFps(self.fps)
 
-        # Crear salida XLink para enviar los frames al host
-        self.xout_rgb = self.pipeline.create(dai.node.XLinkOut)
-        self.xout_rgb.setStreamName("rgb")
-        self.cam_rgb.preview.link(self.xout_rgb.input)
+        # Crear salida XLink
+        xout_rgb = pipeline.create(dai.node.XLinkOut)
+        xout_rgb.setStreamName("rgb")
+        cam_rgb.preview.link(xout_rgb.input)
+        return pipeline
 
-    def start(self):
-        """Inicia la conexión con el dispositivo físico OAK-D."""
-        self.device = dai.Device(self.pipeline)
-        # Cola de salida para obtener los frames. maxSize=4 y blocking=False para fluidez.
-        self.q_rgb = self.device.getOutputQueue("rgb", maxSize=4, blocking=False)
-        print("Cámara OAK-D iniciada correctamente.")
+    def start(self, mode="OAK-D"):
+        """
+        Inicia la cámara seleccionada.
+        mode: "OAK-D" o "Webcam"
+        """
+        if self.is_running: return True
+
+        if mode == "OAK-D":
+            try:
+                pipeline = self._setup_oak_pipeline()
+                self.device = dai.Device(pipeline)
+                self.q_rgb = self.device.getOutputQueue("rgb", maxSize=4, blocking=False)
+                self.is_oak = True
+                self.is_running = True
+                print("Cámara OAK-D iniciada correctamente.")
+                return True
+            except Exception as e:
+                print(f"No se pudo iniciar OAK-D: {e}")
+                return False
+        else:
+            self.cap_webcam = cv2.VideoCapture(0)
+            if self.cap_webcam.isOpened():
+                self.is_oak = False
+                self.is_running = True
+                print("Webcam iniciada correctamente.")
+                return True
+            else:
+                print("Error: No se pudo abrir la webcam.")
+                self.cap_webcam = None
+                return False
 
     def get_frame(self):
-        """
-        Obtiene el frame más reciente de la cámara.
-        Retorna el frame en formato BGR de OpenCV y una versión espejada.
-        """
-        in_rgb = self.q_rgb.get()
-        if in_rgb is not None:
-            frame = in_rgb.getCvFrame()
-            # Espejamos el frame para que actúe como un espejo (común en aplicaciones de UI)
-            frame_mirrored = cv2.flip(frame, 1)
-            return frame_mirrored
+        """Obtiene el frame de la fuente activa."""
+        if not self.is_running: return None
+
+        if self.is_oak:
+            try:
+                in_rgb = self.q_rgb.tryGet()
+                if in_rgb is not None:
+                    frame = in_rgb.getCvFrame()
+                    return cv2.flip(frame, 1)
+            except Exception:
+                return None
+        else:
+            if self.cap_webcam:
+                ret, frame = self.cap_webcam.read()
+                if ret:
+                    # Redimensionar para consistencia
+                    frame = cv2.resize(frame, (self.width, self.height))
+                    return cv2.flip(frame, 1)
         return None
 
     def stop(self):
-        """Cierra la conexión con la cámara."""
+        """Cierra cualquier fuente de video activa."""
         if self.device:
             self.device.close()
-            print("Cámara OAK-D detenida.")
+            self.device = None
+        if self.cap_webcam:
+            self.cap_webcam.release()
+            self.cap_webcam = None
+        self.is_running = False
+        self.is_oak = False
+        print("Cámara detenida.")
 
     def __enter__(self):
         self.start()

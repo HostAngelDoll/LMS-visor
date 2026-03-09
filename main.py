@@ -1,14 +1,14 @@
-#!py -3.10
-# main.py
-# Sistema de Reconocimiento y Grabación de Lenguaje de Señas (LSM)
-# Este código está diseñado para ser estudiado por estudiantes de visión por computadora.
-
-# NOTA: revisar los ultimos cambios en modulos en jules...
-
-import cv2
-import time
+import sys
 import os
+import time
+import cv2
 import numpy as np
+import threading
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QPushButton, QComboBox,
+                             QStatusBar, QFrame, QGroupBox, QTextEdit)
+from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime
+from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent
 
 # Importación de nuestros módulos personalizados
 from camera_engine import CameraEngine
@@ -16,153 +16,286 @@ from hand_processor import HandProcessor
 from gesture_logic import GestureLogic
 from tracker import HandTracker
 from recorder import GestureRecorder
+from training.train_static import train
 
-class HandApp:
-    """
-    Clase principal que orquesta el funcionamiento del sistema.
-    Combina la captura de video, procesamiento de manos, reconocimiento y grabación.
-    """
+class LogWidget(QTextEdit):
+    """Widget de logs con soporte para colores y fondo negro."""
     def __init__(self):
-        # Configuración de rutas
+        super().__init__()
+        self.setReadOnly(True)
+        self.setStyleSheet("""
+            background-color: black;
+            color: white;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            border: 1px solid #444;
+        """)
+
+    def append_log(self, message, mode="info"):
+        """Añade un mensaje al log con el color correspondiente."""
+        timestamp = QDateTime.currentDateTime().toString("hh:mm:ss")
+        color = "white"
+        if mode == "success": color = "#00FF00" # Verde
+        elif mode == "warning": color = "#FFFF00" # Amarillo
+        elif mode == "error": color = "#FF0000" # Rojo
+
+        html_msg = f"<span style='color: #888;'>[{timestamp}]</span> "
+        html_msg += f"<span style='color: {color};'>{message}</span>"
+        self.append(html_msg)
+        # Auto-scroll al final
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+
+class TrainingThread(QThread):
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def run(self):
+        try:
+            train(progress_callback=self.progress.emit)
+            self.finished.emit(True, "¡Entrenamiento completado!")
+        except Exception as e:
+            self.finished.emit(False, f"Error: {e}")
+
+class HandAppQT(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Sistema de Señas LSM - PyQt6")
+        self.setMinimumSize(1000, 700)
+
+        # Inicialización de componentes (Lógica)
         self.model_path = "hand_landmarker.task"
-        
-        # Inicialización de componentes
         self.camera = CameraEngine()
         self.processor = HandProcessor(self.model_path, num_hands=2)
         self.logic = GestureLogic()
         self.tracker = HandTracker()
-        self.recorder = GestureRecorder()
+        self._init_ui() # Inicializar UI antes para tener el log_widget
+        self.recorder = GestureRecorder(log_callback=self.log_widget.append_log)
 
-        # Estado de la aplicación
-        self.running = True
-        self.show_landmarks = True
-        self.only_one_hand = True  # Requerimiento: Seguir solo una mano
-        
-        # Variables para mostrar en UI
+        # Estado
+        self.running_camera = False
         self.current_static_letter = "---"
         self.recognition_source = "---"
-        self.manual_letter = None # Letra seleccionada manualmente con el teclado
+        self.manual_letter = None
         self.target_motion_letter = None
-        self.status_msg = "Listo"
+        self.last_timestamp_ms = -1
+        self.start_time_ns = time.perf_counter_ns()
 
-    def run(self):
-        """Bucle principal de ejecución."""
-        with self.camera as cam:
-            frame_id = 0
-            last_timestamp_ms = -1
-            start_time_ns = time.perf_counter_ns()
-            while self.running:
-                # 1. Obtener frame de la cámara
-                frame = cam.get_frame()
-                if frame is None: continue
+        # Timer para el loop principal (aprox 30 FPS)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(30)
 
-                # 2. Procesar mano con MediaPipe (Asíncrono)
-                # MediaPipe requiere timestamps estrictamente crecientes en ms.
-                curr_ms = (time.perf_counter_ns() - start_time_ns) // 1_000_000
-                if curr_ms <= last_timestamp_ms:
-                    curr_ms = last_timestamp_ms + 1
-                last_timestamp_ms = curr_ms
+    def _init_ui(self):
+        # Widget principal y Layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QHBoxLayout(main_widget)
 
-                self.processor.detect(frame, curr_ms)
-                
-                # 3. Obtener resultados del procesamiento
-                lands = self.processor.get_hand_landmarks(0) # Tomamos la primera mano detectada
-                
-                if lands:
-                    # Extraer propiedades para reconocimiento
-                    props = self.logic.extract_properties(lands, self.processor)
-                    
-                    # Reconocer letra estática actual
-                    detected, source = self.logic.recognize_static(props, lands)
-                    self.current_static_letter = detected if detected else "---"
-                    self.recognition_source = source if source else "---"
+        # --- PANEL IZQUIERDO: Video y Logs ---
+        left_container = QVBoxLayout()
 
-                    # Lógica de Seguimiento Automático (Triggers)
-                    # Si la letra detectada tiene un mapeo de movimiento, activamos seguimiento
-                    motion_target, fingers_to_track = self.logic.get_trigger_info(self.current_static_letter)
-                    
-                    if motion_target:
-                        self.target_motion_letter = motion_target
-                        self.tracker.set_active_fingers(fingers_to_track)
-                        self.status_msg = f"Trigger: {self.current_static_letter} -> Seguir para {motion_target}"
-                    elif not self.recorder.recording:
-                        # Si no estamos grabando y no hay trigger, limpiamos el objetivo
-                        self.target_motion_letter = None
-                        self.tracker.set_active_fingers([])
-                        self.status_msg = "Esperando gesto disparador..."
+        # Área de Video
+        self.video_label = QLabel("Cámara Desconectada")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_label.setStyleSheet("background-color: black; color: white; border: 2px solid #333;")
+        self.video_label.setMinimumSize(640, 480)
+        left_container.addWidget(self.video_label, stretch=4)
 
-                    # Actualizar estelas de los dedos
-                    self.tracker.update(lands, frame.shape)
+        # Área de Logs
+        self.log_widget = LogWidget()
+        self.log_widget.setMaximumHeight(200)
+        left_container.addWidget(QLabel("Logs del Sistema:"))
+        left_container.addWidget(self.log_widget, stretch=1)
 
-                    # Si estamos grabando, añadir datos al buffer
-                    if self.recorder.recording:
-                        record_data = {
-                            "letter": self.recorder.current_letter,
-                            "landmarks": [{"x": l.x, "y": l.y, "z": l.z} for l in lands],
-                            "direction": props["direction"],
-                            "rotation": props["rotation"],
-                            "tracked_fingers": self.tracker.active_fingers,
-                            "props": props
-                        }
-                        self.recorder.add_frame(record_data)
+        # Status Bar inferior para mensajes rápidos
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Listo")
 
-                    # Dibujar landmarks si está activado
-                    if self.show_landmarks:
-                        self._draw_hand_landmarks(frame, lands)
+        main_layout.addLayout(left_container, stretch=3)
 
-                # 4. Actualizar estado del grabador (Verificar tiempos y guardado)
-                self.recorder.update()
+        # --- PANEL DERECHO: Controles ---
+        sidebar = QVBoxLayout()
 
-                # 5. Dibujar estelas (pincel)
-                self.tracker.draw_trails(frame)
+        # Grupo de Cámara
+        cam_group = QGroupBox("Control de Cámara")
+        cam_layout = QVBoxLayout()
 
-                # 5. Dibujar interfaz de usuario (HUD)
-                self._draw_hud(frame)
+        cam_layout.addWidget(QLabel("Seleccionar Fuente:"))
+        self.combo_cam_source = QComboBox()
+        self.combo_cam_source.addItems(["OAK-D", "Webcam"])
+        cam_layout.addWidget(self.combo_cam_source)
 
-                # 6. Mostrar resultado
-                cv2.imshow("Sistema de Señas LSM - Aprendizaje", frame)
+        self.btn_cam = QPushButton("Conectar Cámara")
+        self.btn_cam.setFixedHeight(40)
+        self.btn_cam.clicked.connect(self.toggle_camera)
+        cam_layout.addWidget(self.btn_cam)
+        cam_group.setLayout(cam_layout)
+        sidebar.addWidget(cam_group)
 
-                # 7. Manejar teclado
-                self._handle_keys()
-                frame_id += 1
+        # Grupo de Reconocimiento
+        rec_group = QGroupBox("Reconocimiento")
+        rec_layout = QVBoxLayout()
 
-        cv2.destroyAllWindows()
+        self.lbl_letter = QLabel("Letra: ---")
+        self.lbl_letter.setFont(QFont("Arial", 24, QFont.Weight.Bold))
+        self.lbl_letter.setStyleSheet("color: #00FF00;")
+        rec_layout.addWidget(self.lbl_letter)
 
-    def _handle_keys(self):
-        """Gestiona las pulsaciones de teclas para grabación y control."""
-        key = cv2.waitKey(1) & 0xFF
-        
-        if key == ord('q'):
-            self.running = False
-        
-        # Selección manual de letra (a-z)
-        if ord('a') <= key <= ord('z'):
-            self.manual_letter = chr(key).upper()
-            self.status_msg = f"Letra manual establecida: {self.manual_letter}"
+        self.lbl_source = QLabel("Origen: ---")
+        rec_layout.addWidget(self.lbl_source)
 
-        # Enter: Grabar gesto estático (1.5 segundos)
-        elif key in (13, 10):
-            # Prioridad a la letra manual, si no a la detectada
-            letter_to_save = self.manual_letter or (self.current_static_letter if self.current_static_letter != "---" else None)
-            if letter_to_save:
-                self.recorder.start_recording(letter_to_save, is_motion=False, duration=1.5)
+        rec_group.setLayout(rec_layout)
+        sidebar.addWidget(rec_group)
+
+        # Grupo de Grabación
+        record_group = QGroupBox("Grabación / Datos")
+        record_layout = QVBoxLayout()
+
+        record_layout.addWidget(QLabel("Seleccionar Letra Manual:"))
+        self.combo_letter = QComboBox()
+        self.combo_letter.addItems(["NINGUNA"] + [chr(i) for i in range(ord('A'), ord('Z') + 1)])
+        self.combo_letter.currentTextChanged.connect(self.on_letter_changed)
+        record_layout.addWidget(self.combo_letter)
+
+        self.btn_record_static = QPushButton("Grabar Estático (Enter)")
+        self.btn_record_static.clicked.connect(self.record_static)
+        record_layout.addWidget(self.btn_record_static)
+
+        self.lbl_motion_target = QLabel("Movimiento Pendiente: Ninguno")
+        record_layout.addWidget(self.lbl_motion_target)
+
+        self.btn_record_motion = QPushButton("Grabar Movimiento (F12)")
+        self.btn_record_motion.clicked.connect(self.record_motion)
+        record_layout.addWidget(self.btn_record_motion)
+
+        record_group.setLayout(record_layout)
+        sidebar.addWidget(record_group)
+
+        # Grupo de Entrenamiento
+        train_group = QGroupBox("Modelo ML")
+        train_layout = QVBoxLayout()
+        self.btn_train = QPushButton("Entrenar Modelo (F11)")
+        self.btn_train.clicked.connect(self.start_training)
+        train_layout.addWidget(self.btn_train)
+
+        self.train_progress_lbl = QLabel("")
+        self.train_progress_lbl.setWordWrap(True)
+        train_layout.addWidget(self.train_progress_lbl)
+
+        train_group.setLayout(train_layout)
+        sidebar.addWidget(train_group)
+
+        sidebar.addStretch()
+        main_layout.addLayout(sidebar, stretch=1)
+
+    def toggle_camera(self):
+        if not self.running_camera:
+            mode = self.combo_cam_source.currentText()
+            if self.camera.start(mode=mode):
+                self.running_camera = True
+                self.btn_cam.setText("Desconectar Cámara")
+                self.combo_cam_source.setEnabled(False)
+                self.status_bar.showMessage(f"Cámara {mode} conectada")
+                self.log_widget.append_log(f"Cámara {mode} conectada correctamente.", "success")
+                # Resetear procesador para evitar estados antiguos
+                self.processor.reset()
+                self.tracker.clear_all()
             else:
-                self.status_msg = "Error: Selecciona una letra con el teclado primero."
+                self.status_bar.showMessage("Error: No se pudo conectar la cámara")
+        else:
+            self.camera.stop()
+            self.running_camera = False
+            self.btn_cam.setText("Conectar Cámara")
+            self.combo_cam_source.setEnabled(True)
+            self.video_label.clear()
+            self.video_label.setText("Cámara Desconectada")
+            self.status_bar.showMessage("Cámara desconectada")
+            self.log_widget.append_log("Cámara desconectada.", "warning")
+            self.current_static_letter = "---"
+            self.recognition_source = "---"
+            self.lbl_letter.setText("Letra: ---")
+            self.lbl_source.setText("Origen: ---")
 
-        # F12: Grabar movimiento (activado por los triggers)
-        # Nota: cv2.waitKey puede no capturar F12 igual en todos los sistemas. 
-        # F12 suele ser 255 en algunos contextos o requiere otras librerías. 
-        # En OpenCV común, F12 puede ser un código específico. Usaremos 123 (F12) o similar.
-        # Intentaremos detectar F12 (comúnmente 123 en Linux/Windows con OpenCV)
-        elif key == 123 or key == 122: # F12 o F11 como respaldo
-            if self.target_motion_letter:
-                self.recorder.start_recording(self.target_motion_letter, is_motion=True)
-            else:
-                print("No hay un gesto disparador activo para grabar movimiento.")
+    def on_letter_changed(self, text):
+        if text == "NINGUNA":
+            self.manual_letter = None
+        else:
+            self.manual_letter = text
+        self.status_bar.showMessage(f"Letra manual: {self.manual_letter}")
 
-    def _draw_hand_landmarks(self, frame, lands):
-        """Dibuja los puntos y conexiones de la mano."""
-        # Definición de conexiones MediaPipe
+    def update_frame(self):
+        if not self.running_camera:
+            return
+
+        frame = self.camera.get_frame()
+        if frame is None:
+            return
+
+        # Lógica de procesamiento
+        curr_ms = (time.perf_counter_ns() - self.start_time_ns) // 1_000_000
+        if curr_ms <= self.last_timestamp_ms:
+            curr_ms = self.last_timestamp_ms + 1
+        self.last_timestamp_ms = curr_ms
+
+        self.processor.detect(frame, curr_ms)
+        lands = self.processor.get_hand_landmarks(0)
+
+        if lands:
+            props = self.logic.extract_properties(lands, self.processor)
+            detected, source = self.logic.recognize_static(props, lands)
+            self.current_static_letter = detected if detected else "---"
+            self.recognition_source = source if source else "---"
+
+            # Triggers de movimiento
+            motion_target, fingers_to_track = self.logic.get_trigger_info(self.current_static_letter)
+            if motion_target:
+                self.target_motion_letter = motion_target
+                self.tracker.set_active_fingers(fingers_to_track)
+                self.lbl_motion_target.setText(f"Pendiente (F12): {motion_target}")
+            elif not self.recorder.recording:
+                self.target_motion_letter = None
+                self.tracker.set_active_fingers([])
+                self.lbl_motion_target.setText("Pendiente (F12): Ninguno")
+
+            self.tracker.update(lands, frame.shape)
+
+            if self.recorder.recording:
+                record_data = {
+                    "letter": self.recorder.current_letter,
+                    "landmarks": [{"x": l.x, "y": l.y, "z": l.z} for l in lands],
+                    "direction": props["direction"],
+                    "rotation": props["rotation"],
+                    "tracked_fingers": self.tracker.active_fingers,
+                    "props": props
+                }
+                self.recorder.add_frame(record_data)
+
+            # Dibujar en el frame (solo visual)
+            self._draw_landmarks_cv(frame, lands)
+        else:
+            self.current_static_letter = "---"
+            self.recognition_source = "---"
+
+        self.recorder.update()
+        self.tracker.draw_trails(frame)
+
+        # Actualizar UI
+        self.lbl_letter.setText(f"Letra: {self.current_static_letter}")
+        self.lbl_source.setText(f"Origen: {self.recognition_source}")
+
+        if self.recorder.recording:
+            rem = self.recorder.get_remaining_time()
+            self.status_bar.showMessage(f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s")
+
+        # Convertir frame de OpenCV a QImage para mostrar en PyQt
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        self.video_label.setPixmap(QPixmap.fromImage(qt_image))
+
+    def _draw_landmarks_cv(self, frame, lands):
         CONNECTIONS = [
             (0,1),(1,2),(2,3),(3,4), (0,5),(5,6),(6,7),(7,8),
             (5,9),(9,10),(10,11),(11,12), (9,13),(13,14),(14,15),(15,16),
@@ -176,30 +309,62 @@ class HandApp:
         for lm in lands:
             cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 3, (0, 0, 255), -1)
 
-    def _draw_hud(self, frame):
-        """Dibuja la información en pantalla para el usuario."""
-        y = 30
-        cv2.putText(frame, f"Letra: {self.current_static_letter} ({self.recognition_source})", (10, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        
-        y += 30
-        manual = self.manual_letter if self.manual_letter else "Ninguna"
-        cv2.putText(frame, f"Letra Manual (Teclado): {manual}", (10, y), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    def record_static(self):
+        letter = self.manual_letter or (self.current_static_letter if self.current_static_letter != "---" else None)
+        if letter:
+            self.log_widget.append_log(f"Iniciando grabación estática para letra '{letter}'...")
+            self.recorder.start_recording(letter, is_motion=False, duration=1.5)
+        else:
+            self.status_bar.showMessage("Selecciona una letra primero")
+            self.log_widget.append_log("Error: Intento de grabación sin letra seleccionada.", "error")
 
-        y += 30
-        target = self.target_motion_letter if self.target_motion_letter else "Ninguno"
-        cv2.putText(frame, f"Grabacion Pendiente (F12): {target}", (10, y), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+    def record_motion(self):
+        if self.target_motion_letter:
+            self.recorder.start_recording(self.target_motion_letter, is_motion=True)
+        else:
+            self.status_bar.showMessage("No hay gesto disparador activo")
 
-        if self.recorder.recording:
-            rem = self.recorder.get_remaining_time()
-            cv2.putText(frame, f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s", (10, y + 60), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 3)
+    def start_training(self):
+        self.btn_train.setEnabled(False)
+        self.train_progress_lbl.setText("Entrenando...")
+        self.log_widget.append_log("Iniciando entrenamiento del modelo MLP...", "info")
+        self.thread = TrainingThread()
+        self.thread.progress.connect(self.on_training_progress)
+        self.thread.finished.connect(self.on_training_finished)
+        self.thread.start()
 
-        cv2.putText(frame, self.status_msg, (10, frame.shape[0] - 20), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    def on_training_progress(self, msg):
+        self.train_progress_lbl.setText(msg)
+        # Evitar saturar el log si el mensaje es muy frecuente, pero aquí son epochs
+        self.log_widget.append_log(msg, "info")
+
+    def on_training_finished(self, success, msg):
+        self.btn_train.setEnabled(True)
+        self.train_progress_lbl.setText(msg)
+        self.status_bar.showMessage(msg)
+        self.log_widget.append_log(msg, "success" if success else "error")
+
+    def keyPressEvent(self, event: QKeyEvent):
+        key = event.key()
+        # a-z
+        if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
+            char = chr(key).upper()
+            self.combo_letter.setCurrentText(char)
+
+        elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+            self.record_static()
+
+        elif key == Qt.Key.Key_F11:
+            self.start_training()
+
+        elif key == Qt.Key.Key_F12:
+            self.record_motion()
+
+        elif key == Qt.Key.Key_Q:
+            self.close()
 
 if __name__ == "__main__":
-    app = HandApp()
-    app.run()
+    app = QApplication(sys.argv)
+    window = HandAppQT()
+    window.show()
+    sys.exit(app.exec())

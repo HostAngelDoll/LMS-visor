@@ -10,9 +10,10 @@ class GestureRecorder:
     Maneja la lógica de grabación temporizada.
     Permite guardar gestos estáticos y gestos con movimiento en archivos JSON separados.
     """
-    def __init__(self, static_path="gestures.json", motion_path="motion_gestures.json"):
+    def __init__(self, static_path="gestures.json", motion_path="motion_gestures.json", log_callback=None):
         self.static_path = static_path
         self.motion_path = motion_path
+        self.log_callback = log_callback
         self.recording = False
         self.start_time = 0
         self.duration = 5.0
@@ -47,7 +48,8 @@ class GestureRecorder:
         """Verifica el tiempo y finaliza la grabación si se cumple la duración."""
         if self.recording:
             if time.time() - self.start_time >= self.duration:
-                self.stop_and_save()
+                return self.stop_and_save()
+        return None
 
     def _compute_aggregates(self):
         """Calcula promedios y proporciones de las propiedades grabadas."""
@@ -76,16 +78,21 @@ class GestureRecorder:
 
     def stop_and_save(self):
         """Finaliza la grabación y guarda en el archivo correspondiente."""
-        if not self.recording: return
+        if not self.recording: return None
 
         self.recording = False
+        res_msg = ""
+        res_type = "info"
 
         # Filtrar frames que no tengan landmarks válidos antes de guardar
         valid_buffer = [f for f in self.buffer if f["data"].get("landmarks")]
 
         if len(valid_buffer) < 5:
-            print(f"Grabación cancelada: Insuficientes frames válidos ({len(valid_buffer)}). Asegúrate de que la mano sea visible.")
-            return
+            res_msg = f"Grabación cancelada: Insuficientes frames válidos ({len(valid_buffer)})."
+            res_type = "error"
+            print(res_msg)
+            if self.log_callback: self.log_callback(res_msg, res_type)
+            return (res_msg, res_type)
 
         self.buffer = valid_buffer
         path = self.motion_path if self.is_motion else self.static_path
@@ -120,9 +127,16 @@ class GestureRecorder:
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data_all, f, indent=2, ensure_ascii=False)
-            print(f"Éxito: {len(self.buffer)} frames guardados para '{self.current_letter}' en {path}")
+            res_msg = f"Éxito: {len(self.buffer)} frames guardados para '{self.current_letter}' en {path}"
+            res_type = "success"
+            print(res_msg)
         except Exception as e:
-            print(f"Error fatal al guardar en {path}: {e}")
+            res_msg = f"Error fatal al guardar en {path}: {e}"
+            res_type = "error"
+            print(res_msg)
+
+        if self.log_callback: self.log_callback(res_msg, res_type)
+        return (res_msg, res_type)
 
     def get_remaining_time(self):
         """Retorna el tiempo restante de grabación."""
