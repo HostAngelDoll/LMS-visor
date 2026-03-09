@@ -67,7 +67,7 @@ def train(progress_callback=None):
     # Usar rutas absolutas basadas en la raíz del proyecto
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     json_path = os.path.join(project_root, "gestures.json")
-
+    
     if progress_callback: progress_callback("Cargando dataset...")
     dataset = GestureDataset(json_path)
     if len(dataset.samples) == 0:
@@ -77,7 +77,7 @@ def train(progress_callback=None):
         return
 
     if progress_callback: progress_callback("Iniciando entrenamiento MLP (scikit-learn)...")
-
+    
     # Definición del modelo usando scikit-learn
     # Parámetros equivalentes al MLP previo: capas (128, 64), Adam, ReLU
     model = MLPClassifier(
@@ -103,7 +103,7 @@ def train(progress_callback=None):
     # Guardar modelo y mapeo
     models_dir = os.path.join(project_root, "models")
     os.makedirs(models_dir, exist_ok=True)
-
+    
     model_path = os.path.join(models_dir, "static_model.joblib")
     joblib.dump(model, model_path)
 

@@ -134,7 +134,7 @@ class GestureRecorder:
             res_msg = f"Error fatal al guardar en {path}: {e}"
             res_type = "error"
             print(res_msg)
-
+        
         if self.log_callback: self.log_callback(res_msg, res_type)
         return (res_msg, res_type)
 
