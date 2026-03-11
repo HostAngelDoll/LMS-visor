@@ -28,7 +28,7 @@ Este repositorio contiene un sistema avanzado de visión por computadora diseña
    ```
 
 2. **Instalar dependencias:**
-   Se recomienda usar un entorno virtual de Python 3.10+.
+   Se requiere **Python 3.10** debido a compatibilidad con la librería `depthai`. Se recomienda usar un entorno virtual.
    ```bash
    pip install opencv-python depthai mediapipe numpy keyboard PyQt6 scikit-learn joblib
    ```
