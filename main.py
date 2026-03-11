@@ -5,8 +5,8 @@ import time
 import cv2
 import numpy as np
 import threading
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QLabel, QPushButton, QComboBox,
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QPushButton, QComboBox, 
                              QStatusBar, QFrame, QGroupBox, QTextEdit)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime, QStandardPaths
 from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication
@@ -31,7 +31,7 @@ class LogWidget(QTextEdit):
             font-size: 12px;
             border: 1px solid #444;
         """)
-
+    
     def append_log(self, message, mode="info"):
         """Añade un mensaje al log con el color correspondiente."""
         timestamp = QDateTime.currentDateTime().toString("hh:mm:ss")
@@ -39,7 +39,7 @@ class LogWidget(QTextEdit):
         if mode == "success": color = "#00FF00" # Verde
         elif mode == "warning": color = "#FFFF00" # Amarillo
         elif mode == "error": color = "#FF0000" # Rojo
-
+        
         html_msg = f"<span style='color: #888;'>[{timestamp}]</span> "
         html_msg += f"<span style='color: {color};'>{message}</span>"
         self.append(html_msg)
@@ -94,20 +94,20 @@ class HandAppQT(QMainWindow):
 
         # --- PANEL IZQUIERDO: Video y Logs ---
         left_container = QVBoxLayout()
-
+        
         # Área de Video
         self.video_label = QLabel("Cámara Desconectada")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("background-color: black; color: white; border: 2px solid #333;")
         self.video_label.setMinimumSize(640, 480)
         left_container.addWidget(self.video_label, stretch=4)
-
+        
         # Área de Logs
         self.log_widget = LogWidget()
         self.log_widget.setMaximumHeight(200)
         left_container.addWidget(QLabel("Logs del Sistema:"))
         left_container.addWidget(self.log_widget, stretch=1)
-
+        
         # Status Bar inferior para mensajes rápidos
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -117,11 +117,11 @@ class HandAppQT(QMainWindow):
 
         # --- PANEL DERECHO: Controles ---
         sidebar = QVBoxLayout()
-
+        
         # Grupo de Cámara
         cam_group = QGroupBox("Control de Cámara")
         cam_layout = QVBoxLayout()
-
+        
         cam_layout.addWidget(QLabel("Seleccionar Fuente:"))
         self.combo_cam_source = QComboBox()
         self.combo_cam_source.addItems(["OAK-D", "Webcam"])
@@ -137,37 +137,37 @@ class HandAppQT(QMainWindow):
         # Grupo de Reconocimiento
         rec_group = QGroupBox("Reconocimiento")
         rec_layout = QVBoxLayout()
-
+        
         self.lbl_letter = QLabel("Letra: ---")
         self.lbl_letter.setFont(QFont("Arial", 24, QFont.Weight.Bold))
         self.lbl_letter.setStyleSheet("color: #00FF00;")
         rec_layout.addWidget(self.lbl_letter)
-
+        
         self.lbl_source = QLabel("Origen: ---")
         rec_layout.addWidget(self.lbl_source)
-
+        
         rec_group.setLayout(rec_layout)
         sidebar.addWidget(rec_group)
 
         # Grupo de Grabación
         record_group = QGroupBox("Grabación / Datos")
         record_layout = QVBoxLayout()
-
+        
         record_layout.addWidget(QLabel("Seleccionar Letra Manual:"))
-
+        
         letter_nav_layout = QHBoxLayout()
         self.btn_prev_letter = QPushButton("<")
         self.btn_prev_letter.setFixedWidth(30)
         self.btn_prev_letter.clicked.connect(self.prev_letter)
-
+        
         self.combo_letter = QComboBox()
         self.combo_letter.addItems(["NINGUNA"] + [chr(i) for i in range(ord('A'), ord('Z') + 1)])
         self.combo_letter.currentTextChanged.connect(self.on_letter_changed)
-
+        
         self.btn_next_letter = QPushButton(">")
         self.btn_next_letter.setFixedWidth(30)
         self.btn_next_letter.clicked.connect(self.next_letter)
-
+        
         letter_nav_layout.addWidget(self.btn_prev_letter)
         letter_nav_layout.addWidget(self.combo_letter)
         letter_nav_layout.addWidget(self.btn_next_letter)
@@ -179,7 +179,7 @@ class HandAppQT(QMainWindow):
 
         self.lbl_motion_target = QLabel("Movimiento Pendiente: Ninguno")
         record_layout.addWidget(self.lbl_motion_target)
-
+        
         self.btn_record_motion = QPushButton("Grabar Movimiento (F12)")
         self.btn_record_motion.clicked.connect(self.record_motion)
         record_layout.addWidget(self.btn_record_motion)
@@ -193,11 +193,11 @@ class HandAppQT(QMainWindow):
         self.btn_train = QPushButton("Entrenar Modelo (F11)")
         self.btn_train.clicked.connect(self.start_training)
         train_layout.addWidget(self.btn_train)
-
+        
         self.train_progress_lbl = QLabel("")
         self.train_progress_lbl.setWordWrap(True)
         train_layout.addWidget(self.train_progress_lbl)
-
+        
         train_group.setLayout(train_layout)
         sidebar.addWidget(train_group)
 
@@ -242,18 +242,16 @@ class HandAppQT(QMainWindow):
             self.lbl_source.setText("Origen: ---")
 
     def prev_letter(self):
+        idx = self.combo_letter.currentIndex()
         count = self.combo_letter.count()
-        if count > 0:
-            idx = self.combo_letter.currentIndex()
-            new_idx = (idx - 1) % count
-            self.combo_letter.setCurrentIndex(new_idx)
+        new_idx = (idx - 1) % count
+        self.combo_letter.setCurrentIndex(new_idx)
 
     def next_letter(self):
+        idx = self.combo_letter.currentIndex()
         count = self.combo_letter.count()
-        if count > 0:
-            idx = self.combo_letter.currentIndex()
-            new_idx = (idx + 1) % count
-            self.combo_letter.setCurrentIndex(new_idx)
+        new_idx = (idx + 1) % count
+        self.combo_letter.setCurrentIndex(new_idx)
 
     def on_letter_changed(self, text):
         if text == "NINGUNA":
@@ -321,11 +319,11 @@ class HandAppQT(QMainWindow):
         # Actualizar UI
         self.lbl_letter.setText(f"Letra: {self.current_static_letter}")
         self.lbl_source.setText(f"Origen: {self.recognition_source}")
-
+        
         if self.recorder.recording:
             rem = self.recorder.get_remaining_time()
             self.status_bar.showMessage(f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s")
-
+        
         # Convertir frame de OpenCV a QImage para mostrar en PyQt
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
@@ -367,19 +365,19 @@ class HandAppQT(QMainWindow):
         if screen:
             # GrabWindow(0) captura la pantalla completa en la mayoría de plataformas
             screenshot = screen.grabWindow(0)
-
+            
             # Ruta de Documentos
             docs_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
             save_dir = os.path.join(docs_path, "Capturas_LSM")
-
+            
             # Crear directorio si no existe
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-
+                
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_hhmmss")
             filename = f"screenshot_{timestamp}.png"
             full_path = os.path.join(save_dir, filename)
-
+            
             if screenshot.save(full_path, "PNG"):
                 self.log_widget.append_log(f"Captura guardada: {filename}", "success")
                 self.status_bar.showMessage(f"Captura guardada en {save_dir}")
@@ -415,13 +413,13 @@ class HandAppQT(QMainWindow):
         if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
             char = chr(key).upper()
             self.combo_letter.setCurrentText(char)
-
+        
         elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
             self.record_static()
-
+        
         elif key == Qt.Key.Key_F11:
             self.start_training()
-
+            
         elif key == Qt.Key.Key_F12:
             self.record_motion()
 
