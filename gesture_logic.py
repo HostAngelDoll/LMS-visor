@@ -34,15 +34,21 @@ class GestureLogic:
 
     def __init__(self, gestures_db_path="gestures.json", model_dir="models"):
         self.gestures_db_path = gestures_db_path
-        self.gestures_db = self._load_db()
+        self.model_dir = model_dir
         self.threshold = 0.35 # Umbral de confianza para heurística/DB
         self.mlp_threshold = 0.70 # Umbral para scikit-learn (predict_proba)
 
-        # Cargar modelo MLP
+        # Cargar base de datos y modelo MLP
+        self.gestures_db = {}
         self.model = None
         self.class_mapping = {}
+        self.reload()
+
+    def reload(self):
+        """Recarga la base de datos de gestos y el modelo MLP sin reiniciar la app."""
+        self.gestures_db = self._load_db()
         if SKLEARN_AVAILABLE:
-            self._load_mlp(model_dir)
+            self._load_mlp(self.model_dir)
 
     def _load_db(self):
         """Carga la base de datos de gestos desde el archivo JSON."""
