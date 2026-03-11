@@ -1,5 +1,7 @@
 # LSM-Visor: Sistema de Reconocimiento de Lengua de Señas Mexicana
 
+![Screenshot del Sistema](https://github.com/user-attachments/assets/a9a0524e-b278-4ab4-acf3-1ddcb28737f3)
+
 Este repositorio contiene un sistema avanzado de visión por computadora diseñado para el reconocimiento y grabación de la Lengua de Señas Mexicana (LSM). Utiliza la potencia del hardware de la cámara **OAK-D** o cualquier **Webcam** estándar, junto con la precisión de **MediaPipe** y un modelo de **Machine Learning (MLP)** para ofrecer una experiencia fluida de seguimiento y clasificación de gestos.
 
 ## 🚀 Características
@@ -87,4 +89,6 @@ Si usas OAK-D, verifica la conexión USB-C. Para Webcams, asegúrate de que ning
 El botón de "Capturar Pantalla" guarda archivos PNG en la carpeta `Documentos/Capturas_LSM` de tu usuario.
 
 ---
+Para ver el historial de cambios detallado, consulta el [CHANGELOG.md](CHANGELOG.md).
+
 Este proyecto busca cerrar la brecha entre la visión artificial y la accesibilidad, proporcionando una base sólida para herramientas de traducción de LSM.

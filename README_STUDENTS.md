@@ -1,5 +1,7 @@
 # Guía para Estudiantes - Sistema de Reconocimiento de LSM
 
+![Interfaz del Sistema](https://github.com/user-attachments/assets/a9a0524e-b278-4ab4-acf3-1ddcb28737f3)
+
 Este proyecto ha sido organizado para facilitar su estudio. A continuación se explica la arquitectura y el funcionamiento de cada componente, incluyendo las adiciones recientes de Inteligencia Artificial e Interfaces Gráficas.
 
 ## Estructura del Proyecto
