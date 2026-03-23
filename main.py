@@ -7,9 +7,10 @@ import numpy as np
 import threading
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
-                             QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider)
+                             QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider,
+                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime, QStandardPaths
-from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication
+from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication, QWheelEvent
 
 # Importación de nuestros módulos personalizados
 from camera_engine import CameraEngine
@@ -19,6 +20,58 @@ from tracker import HandTracker
 from recorder import GestureRecorder
 from training.train_static import train
 from training.train_motion import train_motion
+
+class GestureGuideViewer(QGraphicsView):
+    """Visor de imágenes con soporte para zoom y desplazamiento (pan)."""
+    def __init__(self, image_path):
+        super().__init__()
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+
+        pixmap = QPixmap(image_path)
+        if pixmap.isNull():
+            print(f"Error: No se pudo cargar la imagen de guía en {image_path}")
+        self.pixmap_item = QGraphicsPixmapItem(pixmap)
+        self.scene.addItem(self.pixmap_item)
+
+        # Configuración para desplazamiento y zoom
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setBackgroundBrush(Qt.GlobalColor.black)
+
+        self.zoom_factor = 1.15
+
+    def wheelEvent(self, event: QWheelEvent):
+        """Maneja el zoom con la rueda del ratón."""
+        if event.angleDelta().y() > 0:
+            self.scale(self.zoom_factor, self.zoom_factor)
+        else:
+            self.scale(1 / self.zoom_factor, 1 / self.zoom_factor)
+
+    def reset_view(self):
+        """Ajusta la imagen al tamaño del visor."""
+        if not self.pixmap_item.pixmap().isNull():
+            self.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+
+class GestureGuidePanel(QWidget):
+    """Panel lateral que contiene el visor de la guía de señas."""
+    def __init__(self, image_path):
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(5, 5, 5, 5)
+
+        self.viewer = GestureGuideViewer(image_path)
+        self.layout.addWidget(self.viewer)
+
+        self.btn_reset = QPushButton("Restablecer Zoom")
+        self.btn_reset.clicked.connect(self.viewer.reset_view)
+        self.layout.addWidget(self.btn_reset)
+
+        self.setMaximumWidth(500)
+        self.setMinimumWidth(300)
 
 class LogWidget(QTextEdit):
     """Widget de logs con soporte para colores y fondo negro."""
@@ -97,6 +150,11 @@ class HandAppQT(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
+
+        # --- PANEL DE GUÍA DE SEÑAS (OCULTO POR DEFECTO) ---
+        self.guide_panel = GestureGuidePanel("img/20260127_091127.jpg")
+        self.guide_panel.setVisible(False)
+        main_layout.addWidget(self.guide_panel, stretch=1)
 
         # --- PANEL IZQUIERDO: Video y Logs ---
         left_container = QVBoxLayout()
@@ -231,6 +289,11 @@ class HandAppQT(QMainWindow):
         # Grupo de Utilidades
         util_group = QGroupBox("Utilidades")
         util_layout = QVBoxLayout()
+
+        self.btn_toggle_guide = QPushButton("Mostrar/Ocultar Guía de señas")
+        self.btn_toggle_guide.clicked.connect(self.toggle_guide)
+        util_layout.addWidget(self.btn_toggle_guide)
+
         self.btn_screenshot = QPushButton("Capturar Pantalla (Full)")
         self.btn_screenshot.clicked.connect(self.take_full_screenshot)
         util_layout.addWidget(self.btn_screenshot)
@@ -239,6 +302,17 @@ class HandAppQT(QMainWindow):
 
         sidebar.addStretch()
         main_layout.addLayout(sidebar, stretch=1)
+
+    def toggle_guide(self):
+        """Muestra u oculta el panel lateral de la guía de señas."""
+        is_visible = self.guide_panel.isVisible()
+        self.guide_panel.setVisible(not is_visible)
+        if not is_visible:
+            self.status_bar.showMessage("Guía de señas mostrada")
+            # Ajustar la imagen la primera vez que se muestra
+            QTimer.singleShot(50, self.guide_panel.viewer.reset_view)
+        else:
+            self.status_bar.showMessage("Guía de señas oculta")
 
     def toggle_camera(self):
         if not self.running_camera:
