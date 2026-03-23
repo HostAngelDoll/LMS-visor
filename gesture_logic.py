@@ -42,13 +42,18 @@ class GestureLogic:
         self.gestures_db = {}
         self.model = None
         self.class_mapping = {}
+
+        self.motion_model = None
+        self.motion_class_mapping = {}
+
         self.reload()
 
     def reload(self):
-        """Recarga la base de datos de gestos y el modelo MLP sin reiniciar la app."""
+        """Recarga la base de datos de gestos y los modelos MLP sin reiniciar la app."""
         self.gestures_db = self._load_db()
         if SKLEARN_AVAILABLE:
             self._load_mlp(self.model_dir)
+            self._load_motion_mlp(self.model_dir)
 
     def _load_db(self):
         """Carga la base de datos de gestos desde el archivo JSON."""
@@ -59,6 +64,21 @@ class GestureLogic:
             except:
                 return {}
         return {}
+
+    def _load_motion_mlp(self, model_dir):
+        """Carga el modelo scikit-learn de movimiento si existe."""
+        model_path = os.path.join(model_dir, "motion_model.joblib")
+        mapping_path = os.path.join(model_dir, "motion_class_mapping.json")
+
+        if os.path.exists(model_path) and os.path.exists(mapping_path):
+            try:
+                with open(mapping_path, "r", encoding="utf-8") as f:
+                    self.motion_class_mapping = json.load(f)
+
+                self.motion_model = joblib.load(model_path)
+                print(f"Modelo de movimiento cargado con {len(self.motion_class_mapping)} clases.")
+            except Exception as e:
+                print(f"Error al cargar el modelo de movimiento: {e}")
 
     def _load_mlp(self, model_dir):
         """Carga el modelo scikit-learn y el mapeo de clases si existen."""
@@ -187,6 +207,83 @@ class GestureLogic:
 
     def get_trigger_info(self, static_letter):
         return self.TRIGGER_MAP.get(static_letter, (None, []))
+
+    def recognize_motion(self, histories):
+        """
+        Reconoce el gesto de movimiento basado en las trayectorias de los dedos.
+        histories: dict hand_idx -> finger_idx -> deque(maxlen=N) of (x, y)
+        """
+        if not self.motion_model or not histories:
+            return None, 0.0
+
+        # Usamos la mano 0 por defecto
+        hand_0 = histories.get(0, {})
+        if not hand_0:
+            return None, 0.0
+
+        # Extraer características (ej. desplazamientos relativos de los dedos activos)
+        features = self.extract_motion_features(hand_0)
+        if features is None:
+            return None, 0.0
+
+        try:
+            input_data = features.reshape(1, -1)
+            probs = self.motion_model.predict_proba(input_data)[0]
+            predicted_idx = np.argmax(probs)
+            confidence = probs[predicted_idx]
+
+            label_idx = str(predicted_idx)
+            return self.motion_class_mapping.get(label_idx), float(confidence)
+        except Exception as e:
+            # print(f"Error en inferencia de movimiento: {e}")
+            return None, 0.0
+
+    @staticmethod
+    def extract_motion_features(hand_history, seq_len=15):
+        """
+        Extrae características de la trayectoria para el modelo de movimiento.
+        Se basa en los desplazamientos (dx, dy) normalizados de los dedos seguidos.
+        """
+        # Identificar dedos activos (que tengan puntos)
+        active_fids = [fid for fid, pts in hand_history.items() if len(pts) >= 2]
+        if not active_fids:
+            return None
+
+        # Para que el modelo sea consistente, siempre tomamos una longitud fija
+        # Si hay más puntos, los muestreamos o tomamos los últimos.
+        # Si hay menos, retornamos None por ahora (insuficiente para reconocer).
+
+        all_features = []
+        # Para cada dedo, queremos representar su movimiento reciente
+        # Usaremos los últimos 'seq_len' puntos.
+        for fid in [4, 8, 12, 16, 20]: # Orden fijo
+            pts = list(hand_history.get(fid, []))
+            if len(pts) < 5: # Mínimo para considerar movimiento
+                # Rellenar con ceros si no está activo o tiene pocos puntos
+                # 2 (dx, dy) * (seq_len - 1)
+                all_features.extend([0.0] * (2 * (seq_len - 1)))
+                continue
+
+            # Tomar los últimos seq_len puntos
+            if len(pts) > seq_len:
+                pts = pts[-seq_len:]
+
+            # Si tiene menos de seq_len, "pad" con el primer punto (velocidad 0)
+            if len(pts) < seq_len:
+                pts = [pts[0]] * (seq_len - len(pts)) + pts
+
+            # Calcular desplazamientos (dx, dy) normalizados
+            # Normalizamos por el ancho/alto del frame no es ideal,
+            # pero aquí los puntos ya están en píxeles.
+            # Mejor normalizar por una escala interna si fuera posible.
+            for i in range(len(pts) - 1):
+                dx = pts[i+1][0] - pts[i][0]
+                dy = pts[i+1][1] - pts[i][1]
+                # Podríamos normalizar por la distancia total o algo similar
+                all_features.append(dx / 100.0) # Escala arbitraria para evitar valores enormes
+                all_features.append(dy / 100.0)
+
+        return np.array(all_features)
 
     @staticmethod
     def extract_properties(lands, processor):
