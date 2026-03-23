@@ -28,6 +28,14 @@ class HandTracker:
         """Define qué dedos deben dejar rastro."""
         self.active_fingers = finger_ids
 
+    def set_max_len(self, new_len):
+        """Actualiza la longitud máxima de las estelas y ajusta los historiales existentes."""
+        self.max_len = new_len
+        for hand_idx in self.histories:
+            for fid in self.histories[hand_idx]:
+                old_pts = list(self.histories[hand_idx][fid])
+                self.histories[hand_idx][fid] = deque(old_pts, maxlen=new_len)
+
     def update(self, hand_landmarks, frame_shape, hand_idx=0):
         """Actualiza las posiciones de los dedos activos."""
         h, w = frame_shape[:2]

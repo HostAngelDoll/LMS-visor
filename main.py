@@ -5,9 +5,9 @@ import time
 import cv2
 import numpy as np
 import threading
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QComboBox, 
-                             QStatusBar, QFrame, QGroupBox, QTextEdit)
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QPushButton, QComboBox,
+                             QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime, QStandardPaths
 from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication
 
@@ -18,6 +18,7 @@ from gesture_logic import GestureLogic
 from tracker import HandTracker
 from recorder import GestureRecorder
 from training.train_static import train
+from training.train_motion import train_motion
 
 class LogWidget(QTextEdit):
     """Widget de logs con soporte para colores y fondo negro."""
@@ -31,7 +32,7 @@ class LogWidget(QTextEdit):
             font-size: 12px;
             border: 1px solid #444;
         """)
-    
+
     def append_log(self, message, mode="info"):
         """Añade un mensaje al log con el color correspondiente."""
         timestamp = QDateTime.currentDateTime().toString("hh:mm:ss")
@@ -39,7 +40,7 @@ class LogWidget(QTextEdit):
         if mode == "success": color = "#00FF00" # Verde
         elif mode == "warning": color = "#FFFF00" # Amarillo
         elif mode == "error": color = "#FF0000" # Rojo
-        
+
         html_msg = f"<span style='color: #888;'>[{timestamp}]</span> "
         html_msg += f"<span style='color: {color};'>{message}</span>"
         self.append(html_msg)
@@ -50,9 +51,13 @@ class TrainingThread(QThread):
     progress = pyqtSignal(str)
     finished = pyqtSignal(bool, str)
 
+    def __init__(self, train_func):
+        super().__init__()
+        self.train_func = train_func
+
     def run(self):
         try:
-            train(progress_callback=self.progress.emit)
+            self.train_func(progress_callback=self.progress.emit)
             self.finished.emit(True, "¡Entrenamiento completado!")
         except Exception as e:
             self.finished.emit(False, f"Error: {e}")
@@ -75,6 +80,7 @@ class HandAppQT(QMainWindow):
         # Estado
         self.running_camera = False
         self.current_static_letter = "---"
+        self.current_motion_letter = "---"
         self.recognition_source = "---"
         self.manual_letter = None
         self.target_motion_letter = None
@@ -94,20 +100,20 @@ class HandAppQT(QMainWindow):
 
         # --- PANEL IZQUIERDO: Video y Logs ---
         left_container = QVBoxLayout()
-        
+
         # Área de Video
         self.video_label = QLabel("Cámara Desconectada")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("background-color: black; color: white; border: 2px solid #333;")
         self.video_label.setMinimumSize(640, 480)
         left_container.addWidget(self.video_label, stretch=4)
-        
+
         # Área de Logs
         self.log_widget = LogWidget()
         self.log_widget.setMaximumHeight(200)
         left_container.addWidget(QLabel("Logs del Sistema:"))
         left_container.addWidget(self.log_widget, stretch=1)
-        
+
         # Status Bar inferior para mensajes rápidos
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -117,11 +123,11 @@ class HandAppQT(QMainWindow):
 
         # --- PANEL DERECHO: Controles ---
         sidebar = QVBoxLayout()
-        
+
         # Grupo de Cámara
         cam_group = QGroupBox("Control de Cámara")
         cam_layout = QVBoxLayout()
-        
+
         cam_layout.addWidget(QLabel("Seleccionar Fuente:"))
         self.combo_cam_source = QComboBox()
         self.combo_cam_source.addItems(["OAK-D", "Webcam"])
@@ -137,37 +143,42 @@ class HandAppQT(QMainWindow):
         # Grupo de Reconocimiento
         rec_group = QGroupBox("Reconocimiento")
         rec_layout = QVBoxLayout()
-        
+
         self.lbl_letter = QLabel("Letra: ---")
         self.lbl_letter.setFont(QFont("Arial", 24, QFont.Weight.Bold))
         self.lbl_letter.setStyleSheet("color: #00FF00;")
         rec_layout.addWidget(self.lbl_letter)
-        
+
         self.lbl_source = QLabel("Origen: ---")
         rec_layout.addWidget(self.lbl_source)
-        
+
+        self.lbl_motion = QLabel("Movimiento: ---")
+        self.lbl_motion.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.lbl_motion.setStyleSheet("color: #00FFFF;")
+        rec_layout.addWidget(self.lbl_motion)
+
         rec_group.setLayout(rec_layout)
         sidebar.addWidget(rec_group)
 
         # Grupo de Grabación
         record_group = QGroupBox("Grabación / Datos")
         record_layout = QVBoxLayout()
-        
+
         record_layout.addWidget(QLabel("Seleccionar Letra Manual:"))
-        
+
         letter_nav_layout = QHBoxLayout()
         self.btn_prev_letter = QPushButton("<")
         self.btn_prev_letter.setFixedWidth(30)
         self.btn_prev_letter.clicked.connect(self.prev_letter)
-        
+
         self.combo_letter = QComboBox()
         self.combo_letter.addItems(["NINGUNA"] + [chr(i) for i in range(ord('A'), ord('Z') + 1)])
         self.combo_letter.currentTextChanged.connect(self.on_letter_changed)
-        
+
         self.btn_next_letter = QPushButton(">")
         self.btn_next_letter.setFixedWidth(30)
         self.btn_next_letter.clicked.connect(self.next_letter)
-        
+
         letter_nav_layout.addWidget(self.btn_prev_letter)
         letter_nav_layout.addWidget(self.combo_letter)
         letter_nav_layout.addWidget(self.btn_next_letter)
@@ -179,7 +190,7 @@ class HandAppQT(QMainWindow):
 
         self.lbl_motion_target = QLabel("Movimiento Pendiente: Ninguno")
         record_layout.addWidget(self.lbl_motion_target)
-        
+
         self.btn_record_motion = QPushButton("Grabar Movimiento (F12)")
         self.btn_record_motion.clicked.connect(self.record_motion)
         record_layout.addWidget(self.btn_record_motion)
@@ -193,13 +204,29 @@ class HandAppQT(QMainWindow):
         self.btn_train = QPushButton("Entrenar Modelo (F11)")
         self.btn_train.clicked.connect(self.start_training)
         train_layout.addWidget(self.btn_train)
-        
+
+        self.btn_train_motion = QPushButton("Entrenar Movimiento")
+        self.btn_train_motion.clicked.connect(self.start_motion_training)
+        train_layout.addWidget(self.btn_train_motion)
+
         self.train_progress_lbl = QLabel("")
         self.train_progress_lbl.setWordWrap(True)
         train_layout.addWidget(self.train_progress_lbl)
-        
+
         train_group.setLayout(train_layout)
         sidebar.addWidget(train_group)
+
+        # Grupo de Configuración Visual
+        visual_group = QGroupBox("Configuración Visual")
+        visual_layout = QVBoxLayout()
+        visual_layout.addWidget(QLabel("Longitud de Estela:"))
+        self.sld_trail_len = QSlider(Qt.Orientation.Horizontal)
+        self.sld_trail_len.setRange(5, 100)
+        self.sld_trail_len.setValue(self.tracker.max_len)
+        self.sld_trail_len.valueChanged.connect(self.update_trail_len)
+        visual_layout.addWidget(self.sld_trail_len)
+        visual_group.setLayout(visual_layout)
+        sidebar.addWidget(visual_group)
 
         # Grupo de Utilidades
         util_group = QGroupBox("Utilidades")
@@ -237,9 +264,11 @@ class HandAppQT(QMainWindow):
             self.status_bar.showMessage("Cámara desconectada")
             self.log_widget.append_log("Cámara desconectada.", "warning")
             self.current_static_letter = "---"
+            self.current_motion_letter = "---"
             self.recognition_source = "---"
             self.lbl_letter.setText("Letra: ---")
             self.lbl_source.setText("Origen: ---")
+            self.lbl_motion.setText("Movimiento: ---")
 
     def prev_letter(self):
         idx = self.combo_letter.currentIndex()
@@ -296,6 +325,16 @@ class HandAppQT(QMainWindow):
 
             self.tracker.update(lands, frame.shape)
 
+            # Reconocimiento de movimiento continuo
+            if self.tracker.active_fingers:
+                m_detected, m_conf = self.logic.recognize_motion(self.tracker.histories)
+                if m_detected and m_conf > 0.7:
+                    self.current_motion_letter = f"{m_detected} ({m_conf:.2f})"
+                else:
+                    self.current_motion_letter = "---"
+            else:
+                self.current_motion_letter = "---"
+
             if self.recorder.recording:
                 record_data = {
                     "letter": self.recorder.current_letter,
@@ -311,6 +350,7 @@ class HandAppQT(QMainWindow):
             self._draw_landmarks_cv(frame, lands)
         else:
             self.current_static_letter = "---"
+            self.current_motion_letter = "---"
             self.recognition_source = "---"
 
         self.recorder.update()
@@ -319,11 +359,12 @@ class HandAppQT(QMainWindow):
         # Actualizar UI
         self.lbl_letter.setText(f"Letra: {self.current_static_letter}")
         self.lbl_source.setText(f"Origen: {self.recognition_source}")
-        
+        self.lbl_motion.setText(f"Movimiento: {self.current_motion_letter}")
+
         if self.recorder.recording:
             rem = self.recorder.get_remaining_time()
             self.status_bar.showMessage(f"GRABANDO {self.recorder.current_letter}: {rem:.1f}s")
-        
+
         # Convertir frame de OpenCV a QImage para mostrar en PyQt
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
@@ -360,35 +401,57 @@ class HandAppQT(QMainWindow):
         else:
             self.status_bar.showMessage("No hay gesto disparador activo")
 
+    def update_trail_len(self, val):
+        self.tracker.set_max_len(val)
+        self.status_bar.showMessage(f"Longitud de estela: {val}")
+
     def take_full_screenshot(self):
         screen = QGuiApplication.primaryScreen()
         if screen:
             # GrabWindow(0) captura la pantalla completa en la mayoría de plataformas
             screenshot = screen.grabWindow(0)
-            
+
             # Ruta de Documentos
             docs_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
             save_dir = os.path.join(docs_path, "Capturas_LSM")
-            
+
             # Crear directorio si no existe
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-                
+
             timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_hhmmss")
             filename = f"screenshot_{timestamp}.png"
             full_path = os.path.join(save_dir, filename)
-            
+
             if screenshot.save(full_path, "PNG"):
                 self.log_widget.append_log(f"Captura guardada: {filename}", "success")
                 self.status_bar.showMessage(f"Captura guardada en {save_dir}")
             else:
                 self.log_widget.append_log("Error al guardar captura", "error")
 
+    def start_motion_training(self):
+        self.btn_train_motion.setEnabled(False)
+        self.train_progress_lbl.setText("Entrenando Movimiento...")
+        self.log_widget.append_log("Iniciando entrenamiento del modelo de Movimiento...", "info")
+        self.thread = TrainingThread(train_motion)
+        self.thread.progress.connect(self.on_training_progress)
+        self.thread.finished.connect(self.on_motion_training_finished)
+        self.thread.start()
+
+    def on_motion_training_finished(self, success, msg):
+        self.btn_train_motion.setEnabled(True)
+        self.train_progress_lbl.setText(msg)
+        self.status_bar.showMessage(msg)
+        self.log_widget.append_log(msg, "success" if success else "error")
+        if success:
+            self.logic.reload()
+            self.log_widget.append_log("Modelo de movimiento y base de datos recargados.", "success")
+
     def start_training(self):
         self.btn_train.setEnabled(False)
         self.train_progress_lbl.setText("Entrenando...")
         self.log_widget.append_log("Iniciando entrenamiento del modelo MLP...", "info")
-        self.thread = TrainingThread()
+        self.thread = TrainingThread(train)
         self.thread.progress.connect(self.on_training_progress)
         self.thread.finished.connect(self.on_training_finished)
         self.thread.start()
@@ -413,13 +476,13 @@ class HandAppQT(QMainWindow):
         if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
             char = chr(key).upper()
             self.combo_letter.setCurrentText(char)
-        
+
         elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
             self.record_static()
-        
+
         elif key == Qt.Key.Key_F11:
             self.start_training()
-            
+
         elif key == Qt.Key.Key_F12:
             self.record_motion()
 
