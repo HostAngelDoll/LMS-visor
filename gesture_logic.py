@@ -252,7 +252,7 @@ class GestureLogic:
         # Para que el modelo sea consistente, siempre tomamos una longitud fija
         # Si hay más puntos, los muestreamos o tomamos los últimos.
         # Si hay menos, retornamos None por ahora (insuficiente para reconocer).
-
+        
         all_features = []
         # Para cada dedo, queremos representar su movimiento reciente
         # Usaremos los últimos 'seq_len' puntos.
@@ -263,18 +263,18 @@ class GestureLogic:
                 # 2 (dx, dy) * (seq_len - 1)
                 all_features.extend([0.0] * (2 * (seq_len - 1)))
                 continue
-
+            
             # Tomar los últimos seq_len puntos
             if len(pts) > seq_len:
                 pts = pts[-seq_len:]
-
+            
             # Si tiene menos de seq_len, "pad" con el primer punto (velocidad 0)
             if len(pts) < seq_len:
                 pts = [pts[0]] * (seq_len - len(pts)) + pts
-
+            
             # Calcular desplazamientos (dx, dy) normalizados
-            # Normalizamos por el ancho/alto del frame no es ideal,
-            # pero aquí los puntos ya están en píxeles.
+            # Normalizamos por el ancho/alto del frame no es ideal, 
+            # pero aquí los puntos ya están en píxeles. 
             # Mejor normalizar por una escala interna si fuera posible.
             for i in range(len(pts) - 1):
                 dx = pts[i+1][0] - pts[i][0]

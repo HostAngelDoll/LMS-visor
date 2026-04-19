@@ -37,15 +37,15 @@ class MotionDataset:
                 frames = sample.get("frames", [])
                 # Un "sample" de movimiento es una secuencia completa de 5 segundos.
                 # Podemos extraer múltiples ventanas de seq_len para aumentar el dataset.
-
+                
                 # Extraer trayectorias de los frames
                 finger_histories = {fid: [] for fid in [4, 8, 12, 16, 20]}
-
+                
                 # Necesitamos un frame de referencia (w, h) para convertir landmarks a pixeles (o algo similar)
                 # O simplemente trabajar con landmarks normalizados directamente.
                 # GestureLogic.extract_motion_features usa pixeles (histories del tracker).
                 # Convertiremos los landmarks (0-1) a una escala de 640x480 para consistencia.
-
+                
                 for frame in frames:
                     lands = frame.get("data", {}).get("landmarks", [])
                     if len(lands) == 21:
@@ -61,13 +61,13 @@ class MotionDataset:
                     window_hist = {}
                     for fid, all_pts in finger_histories.items():
                         window_hist[fid] = all_pts[start_f : start_f + seq_len]
-
+                    
                     features = GestureLogic.extract_motion_features(window_hist, seq_len=seq_len)
                     if features is not None:
                         self.samples.append(features)
                         self.labels.append(self.class_to_idx[letter])
                         letter_samples_count += 1
-
+                        
             print(f"  Letra '{letter}': {letter_samples_count} ventanas de movimiento.")
 
         self.samples = np.array(self.samples)
@@ -77,7 +77,7 @@ class MotionDataset:
 def train_motion(progress_callback=None):
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     json_path = os.path.join(project_root, "motion_gestures.json")
-
+    
     if progress_callback: progress_callback("Cargando dataset de movimiento...")
     dataset = MotionDataset(json_path)
     if len(dataset.samples) == 0:
@@ -87,7 +87,7 @@ def train_motion(progress_callback=None):
         return
 
     if progress_callback: progress_callback("Iniciando entrenamiento MLP (Movimiento)...")
-
+    
     model = MLPClassifier(
         hidden_layer_sizes=(128, 64),
         activation='relu',
@@ -109,7 +109,7 @@ def train_motion(progress_callback=None):
     # Guardar modelo y mapeo
     models_dir = os.path.join(project_root, "models")
     os.makedirs(models_dir, exist_ok=True)
-
+    
     model_path = os.path.join(models_dir, "motion_model.joblib")
     joblib.dump(model, model_path)
 
