@@ -1,94 +1,84 @@
-# LSM-Visor: Sistema de Reconocimiento de Lengua de Señas Mexicana
+# LMS-Visor
+## Documentación instructiva
 
 ![Screenshot del Sistema](https://github.com/user-attachments/assets/a9a0524e-b278-4ab4-acf3-1ddcb28737f3)
 
-Este repositorio contiene un sistema avanzado de visión por computadora diseñado para el reconocimiento y grabación de la Lengua de Señas Mexicana (LSM). Utiliza la potencia del hardware de la cámara **OAK-D** o cualquier **Webcam** estándar, junto con la precisión de **MediaPipe** y un modelo de **Machine Learning (MLP)** para ofrecer una experiencia fluida de seguimiento y clasificación de gestos.
+### 1. Objetivo
+LMS-Visor es una aplicación de escritorio en Python para capturar video, detectar landmarks de la mano, reconocer señas y registrar muestras para entrenamiento. La interfaz está construida con PyQt6 y trabaja con una cámara OAK-D o una webcam estándar.
 
-## 🚀 Características
-- **Interfaz Moderna en PyQt6**: Panel de control intuitivo con visualización en tiempo real, logs detallados y controles de grabación.
-- **Detección de Manos en Tiempo Real**: Procesamiento de 21 landmarks por mano con alta precisión mediante MediaPipe.
-- **Reconocimiento Híbrido Avanzado**:
-    1. **MLP (Perceptrón Multicapa)**: Clasificador entrenado con scikit-learn para máxima precisión.
-    2. **Reglas Heurísticas**: Lógica geométrica para casos base.
-    3. **Comparación Estadística**: Validación contra base de datos JSON.
-- **Soporte Multicámara**: Selector dinámico para alternar entre cámaras OAK-D (Luxonis) y Webcams convencionales.
-- **Entrenamiento Integrado**: Capacidad de re-entrenar el modelo de IA directamente desde la interfaz sin detener la aplicación.
-- **Sistema de Grabación Inteligente**: Captura de gestos estáticos y dinámicos (trayectorias de 5 segundos) con generación automática de agregados estadísticos.
-- **Feedback Visual (Pincel)**: Estelas de colores personalizadas para cada dedo que facilitan la visualización de gestos con movimiento.
+### 2. Componentes principales
+- `main.py`: orquesta la interfaz, la cámara, el reconocimiento, la grabación y el entrenamiento.
+- `camera_engine.py`: abstrae la fuente de video.
+- `hand_processor.py`: ejecuta la detección de manos con MediaPipe HandLandmarker.
+- `gesture_logic.py`: contiene la lógica de reconocimiento estático y de movimiento.
+- `tracker.py`: mantiene las trayectorias de los dedos activos.
+- `recorder.py`: guarda muestras estáticas y de movimiento.
+- `pencil.py`: utilidad separada para visualizar rastros y pruebas de seguimiento.
+- `gestures.json`: base de datos de gestos estáticos.
+- `motion_gestures.json`: base de datos de gestos dinámicos.
+- `models/`: modelos entrenados y mapeo de clases.
 
-## 🛠 Requisitos de Hardware
-- **Cámara OAK-D (Opcional)**: El sistema está optimizado para el ecosistema DepthAI de Luxonis.
-- **Webcam Estándar**: Soporte para cámaras integradas o USB mediante OpenCV.
-- **Procesador**: Se recomienda un equipo capaz de mantener al menos 20-30 FPS para una detección fluida.
+### 3. Requisitos
+- Python 3.10
+- `opencv-python`
+- `depthai`
+- `mediapipe`
+- `numpy`
+- `keyboard`
+- `PyQt6`
+- `scikit-learn`
+- `joblib`
+- Archivo `hand_landmarker.task` en la raíz del proyecto
 
-## 📦 Instalación
+### 4. Instalación
+1. Clonar el repositorio.
+2. Crear y activar un entorno virtual.
+3. Instalar dependencias.
+4. Verificar que exista `hand_landmarker.task`.
+5. Ejecutar `main.py`.
 
-1. **Clonar el repositorio:**
-   ```bash
-   git clone <url-del-repo>
-   cd LSM-visor
-   ```
+### 5. Flujo de uso
+1. Abrir la aplicación.
+2. Seleccionar la fuente de cámara.
+3. Conectar la cámara.
+4. Observar la detección de mano en pantalla.
+5. Elegir una letra manual o dejar que el sistema la detecte.
+6. Guardar una muestra estática o iniciar una grabación de movimiento.
+7. Entrenar el modelo cuando haya suficientes muestras.
 
-2. **Instalar dependencias:**
-   Se requiere **Python 3.10** debido a compatibilidad con la librería `depthai`. Se recomienda usar un entorno virtual.
-   ```bash
-   pip install opencv-python depthai mediapipe numpy keyboard PyQt6 scikit-learn joblib
-   ```
+### 6. Reconocimiento
+El sistema usa una lógica híbrida:
+- primero intenta clasificar con MLP,
+- si la confianza no alcanza el umbral, cae a heurísticas,
+- y después usa comparación estadística sobre la base de datos JSON.
 
-3. **Modelo de MediaPipe:**
-   Asegúrate de que el archivo `hand_landmarker.task` esté presente en el directorio raíz.
+### 7. Entrenamiento
+- `F11` inicia el entrenamiento del modelo estático.
+- El modelo se recarga en caliente cuando termina.
+- También existe un botón para entrenar movimiento.
 
-## 📂 Estructura del Repositorio
+### 8. Grabación
+- Las muestras estáticas duran 1.5 segundos.
+- Las muestras de movimiento duran 5 segundos por defecto.
+- La grabación descarta buffers inválidos con pocos frames útiles.
 
-- **`main.py`**: El orquestador principal basado en PyQt6. Gestiona la UI, el ciclo de vida de la app y los eventos.
-- **`camera_engine.py`**: Motor de captura que unifica el acceso a OAK-D y Webcams.
-- **`hand_processor.py`**: Núcleo de procesamiento de visión. Calcula ángulos de flexión, distancias normalizadas y orientación espacial.
-- **`gesture_logic.py`**: Cerebro del reconocimiento. Implementa el clasificador MLP y las reglas de negocio.
-- **`training/`**: Scripts para el entrenamiento del modelo MLP (`train_static.py`).
-- **`models/`**: Almacena el modelo entrenado (`static_model.joblib`) y el mapeo de clases.
-- **`tracker.py`**: Implementa el seguimiento temporal de los dedos y las estelas visuales.
-- **`recorder.py`**: Maneja la persistencia en `gestures.json` y `motion_gestures.json`.
-- **`pencil.py`**: Herramienta de dibujo independiente para análisis de trayectorias.
+### 9. Controles
+- `A` a `Z`: selecciona letra manual.
+- `Enter`: graba muestra estática.
+- `F11`: entrena el modelo.
+- `F12`: graba movimiento.
+- `Q`: cierra la aplicación.
 
-## ⚙️ Funcionamiento Técnico
+### 10. Utilidades
+- La pantalla completa puede capturarse desde la interfaz.
+- Las capturas se guardan en `Documentos/Capturas_LSM/`.
+- El panel de guía de señas puede mostrarse u ocultarse.
+- El control visual de estelas permite ajustar la longitud del rastro.
 
-### Lógica de Reconocimiento
-El sistema en `gesture_logic.py` prioriza el modelo **MLP (Neural Network)**. Si la confianza es baja (< 70%), recurre a reglas heurísticas y finalmente a la comparación estadística.
+### 11. Notas técnicas
+- `camera_engine.py` soporta OAK-D y webcam.
+- `hand_processor.py` usa detección asíncrona con MediaPipe.
+- `gesture_logic.py` incluye disparadores como `I -> J`, `P -> K`, `N -> Ñ`, `Q -> Q`, `X -> X` y `D -> Z`.
+- `tracker.py` dibuja estelas por dedo.
+- `pencil.py` incluye callbacks de teclado para alternar dedos y salir con `ESC`.
 
-### Entrenamiento de la IA
-Al presionar **F11**, el sistema toma todas las muestras almacenadas en `gestures.json`, las normaliza y entrena un nuevo modelo `MLPClassifier`. Una vez finalizado, el modelo se recarga en caliente sin necesidad de reiniciar la aplicación.
-
-### Sistema de Disparadores (Triggers)
-El flujo para gestos dinámicos es automático:
-- Al detectar una base estática (ej. 'P'), se activa un "trigger" para la letra dinámica (ej. 'K').
-- El `tracker` configura los dedos a seguir y el sistema queda listo para grabar con **F12**.
-
-## ⌨️ Controles del Teclado
-
-| Tecla | Acción |
-| :--- | :--- |
-| **`A - Z`** | Establece manualmente la letra objetivo para la grabación / navegación en el menú. |
-| **`Enter`** | Captura y guarda una muestra **estática** (1.5 segundos de muestras). |
-| **`F11`** | Inicia el **entrenamiento** del modelo de Machine Learning. |
-| **`F12`** | Inicia una grabación de **movimiento** de 5 segundos. |
-| **`Q`** / **`Esc`** | Sale de la aplicación de forma segura. |
-| **`F1 - F5`** | (En `pencil.py`) Alterna rastros para: Meñique, Anular, Medio, Índice y Pulgar. |
-
-## ❗ Solución de Problemas (Troubleshooting)
-
-**1. Error de scikit-learn:**
-Si el sistema indica que `scikit-learn` no pudo cargarse, el reconocimiento MLP se desactivará automáticamente. Asegúrate de tener instalada una versión compatible:
-```bash
-pip install --upgrade scikit-learn joblib
-```
-
-**2. Cámara no detectada:**
-Si usas OAK-D, verifica la conexión USB-C. Para Webcams, asegúrate de que ninguna otra aplicación esté usando la cámara. El selector en la UI permite reintentar la conexión.
-
-**3. Capturas de Pantalla:**
-El botón de "Capturar Pantalla" guarda archivos PNG en la carpeta `Documentos/Capturas_LSM` de tu usuario.
-
----
-Para ver el historial de cambios detallado, consulta el [CHANGELOG.md](CHANGELOG.md).
-
-Este proyecto busca cerrar la brecha entre la visión artificial y la accesibilidad, proporcionando una base sólida para herramientas de traducción de LSM.
