@@ -1,49 +1,156 @@
-# Guía para Estudiantes - Sistema de Reconocimiento de LSM
+# LMS-Visor
 
-![Interfaz del Sistema](https://github.com/user-attachments/assets/a9a0524e-b278-4ab4-acf3-1ddcb28737f3)
+Aplicación de escritorio en Python para captura de video, detección de manos, reconocimiento de señas y registro de muestras para entrenamiento.
 
-Este proyecto ha sido organizado para facilitar su estudio. A continuación se explica la arquitectura y el funcionamiento de cada componente, incluyendo las adiciones recientes de Inteligencia Artificial e Interfaces Gráficas.
+## Descripción
 
-## Estructura del Proyecto
+LMS-Visor está orientado al trabajo con Lengua de Señas Mexicana (LSM). La aplicación integra una interfaz de PyQt6 con captura de cámara, detección de landmarks de mano, lógica de reconocimiento y herramientas para grabar muestras estáticas y dinámicas.
 
-El código se divide en módulos especializados:
+El sistema puede trabajar con una cámara **OAK-D** o con una **webcam** convencional.
 
-1.  **`main.py` (Orquestador PyQt6)**: Es el punto de entrada. Utiliza la librería **PyQt6** para crear una interfaz con botones, logs y visualización. Los estudiantes pueden aprender aquí sobre la gestión de hilos (**QThread**) para que la IA no congele la interfaz.
-2.  **`camera_engine.py` (Captura Dual)**: Gestiona tanto la cámara OAK-D (`depthai`) como Webcams estándar (`opencv`). Es un gran ejemplo de cómo abstraer el hardware.
-3.  **`hand_processor.py` (Visión y Geometría)**: Utiliza **MediaPipe** para detectar los 21 puntos (landmarks). Contiene funciones para calcular:
-    *   Ángulos entre dedos (curvatura).
-    *   Distancias normalizadas.
-    *   Dirección (Arriba, Abajo, Izquierda, Derecha).
-4.  **`gesture_logic.py` (Cerebro del Sistema)**: Decide la letra detectada usando un sistema híbrido:
-    *   **MLP (Machine Learning)**: Un Perceptrón Multicapa que aprende de los datos.
-    *   **Heurística**: Reglas lógicas matemáticas.
-    *   **Estadística**: Comparación directa con promedios en JSON.
-5.  **`training/train_static.py`**: Script que toma los datos de `gestures.json` y entrena el modelo de scikit-learn.
-6.  **`tracker.py` y `recorder.py`**: Gestionan el seguimiento visual y el guardado de datos en archivos JSON.
+## Cómo está compuesto
 
-## Conceptos Clave para Estudiar
+### `main.py`
+Es el punto de entrada de la aplicación. Coordina la interfaz, la cámara, el procesamiento de video, el reconocimiento, la grabación y el entrenamiento.
 
-### 1. Clasificación con MLP (Machine Learning)
-El sistema usa un modelo **MLP (Multi-Layer Perceptron)**.
-*   **Entrada**: Los 21 puntos de la mano (x, y, z) aplanados en un vector de 63 valores.
-*   **Normalización**: Antes de entrar al modelo, los puntos se centran en la muñeca y se escalan según el tamaño de la palma. Esto permite que el modelo funcione igual si la mano está cerca o lejos.
+### `camera_engine.py`
+Abstrae la fuente de video. Permite usar:
+- OAK-D mediante DepthAI
+- Webcam mediante `cv2.VideoCapture(0)`
 
-### 2. Procesamiento Asíncrono (Hilos)
-Cuando presionas **F11**, el entrenamiento ocurre en un hilo separado (`TrainingThread`). Esto es vital para que la ventana de la aplicación siga respondiendo mientras la computadora realiza cálculos intensos.
+### `hand_processor.py`
+Ejecuta la detección de mano con MediaPipe Hand Landmarker y entrega los landmarks para el análisis posterior.
 
-### 3. Sistema de Disparadores (Triggers)
-El sistema automático de seguimiento funciona así:
-*   Se reconoce una letra estática base (ej. 'P').
-*   Se busca en `TRIGGER_MAP` (en `gesture_logic.py`) si debe iniciar un seguimiento.
-*   Si existe, se activan los colores de los dedos necesarios (ej. índice para la 'K') y se habilita la grabación de movimiento.
+### `gesture_logic.py`
+Contiene la lógica de reconocimiento:
+- reconocimiento estático
+- detección de movimiento
+- disparadores entre letras
+- comparación con datos almacenados en JSON
+- uso de modelo MLP entrenado
 
-### 4. Persistencia de Datos
-Los datos se guardan en formato **JSON**. Observa cómo `recorder.py` calcula "agregados" (promedios) al guardar, lo que facilita que luego podamos comparar una mano nueva contra esos promedios.
+### `tracker.py`
+Mantiene el seguimiento visual de los dedos y ayuda a dibujar trayectorias.
 
-## Tareas Sugeridas para Estudiantes
+### `recorder.py`
+Se encarga de guardar muestras:
+- muestras estáticas
+- muestras de movimiento
 
-1.  **Exploración de Datos**: Abre `gestures.json` y observa cómo se guardan las coordenadas. ¿Podrías crear un script sencillo que grafique estos puntos?
-2.  **Ajuste de Hiperparámetros**: En `training/train_static.py`, cambia el número de neuronas en `hidden_layer_sizes=(128, 64)` y observa si la precisión mejora o empeora.
-3.  **Nuevas Reglas**: Intenta añadir una regla en `_recognize_heuristic` dentro de `gesture_logic.py` que detecte la letra "V" (dedos índice y medio levantados en forma de V).
-4.  **Personalización UI**: Cambia los colores de los logs en la clase `LogWidget` dentro de `main.py`.
-5.  **Análisis de Trayectorias**: Usa `pencil.py` para dibujar letras en el aire y analiza cómo cambian las coordenadas en el tiempo.
+### `pencil.py`
+Herramienta auxiliar para pruebas visuales y manejo de trazos.
+
+### Archivos de datos y modelos
+- `gestures.json`: datos de gestos estáticos
+- `motion_gestures.json`: datos de movimientos
+- `models/`: modelos entrenados y recursos relacionados
+- `hand_landmarker.task`: modelo requerido por MediaPipe
+
+## Requisitos
+
+- Python 3.10
+- `opencv-python`
+- `depthai`
+- `mediapipe`
+- `numpy`
+- `keyboard`
+- `PyQt6`
+- `scikit-learn`
+- `joblib`
+
+## Instalación
+
+1. Clona el repositorio.
+2. Crea y activa un entorno virtual.
+3. Instala las dependencias.
+4. Verifica que el archivo `hand_landmarker.task` esté en la raíz del proyecto.
+5. Ejecuta `main.py`.
+
+Ejemplo en Windows:
+
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install opencv-python depthai mediapipe numpy keyboard PyQt6 scikit-learn joblib
+python main.py
+```
+
+## Uso básico
+
+1. Abre la aplicación.
+2. Selecciona la fuente de cámara.
+3. Conecta la cámara.
+4. Coloca la mano frente al lente.
+5. Observa la letra detectada en la interfaz.
+6. Guarda muestras si deseas alimentar el sistema.
+7. Entrena el modelo cuando tengas suficientes datos.
+
+## Controles
+
+- `A` a `Z`: selección manual de letra
+- `Enter`: grabar muestra estática
+- `F11`: entrenar el modelo
+- `F12`: grabar muestra de movimiento
+- `Q`: cerrar la aplicación
+
+## Flujo de trabajo
+
+1. El sistema captura video desde la cámara seleccionada.
+2. `hand_processor.py` detecta la mano y extrae landmarks.
+3. `gesture_logic.py` analiza los datos y propone una letra.
+4. Si hay una letra válida, el sistema puede activar seguimiento o grabación.
+5. `recorder.py` guarda la muestra si se inicia una captura.
+6. El entrenamiento puede ejecutarse sin cerrar la aplicación.
+
+## Reconocimiento
+
+La lógica de reconocimiento combina varios criterios:
+- modelo MLP
+- heurísticas de decisión
+- comparación estadística con datos existentes
+
+Cuando la confianza no es suficiente, el sistema puede apoyarse en reglas adicionales antes de aceptar una predicción.
+
+## Captura de pantalla
+
+La aplicación puede guardar capturas completas en:
+
+`Documentos/Capturas_LSM/`
+
+El nombre del archivo se genera automáticamente con fecha y hora.
+
+## Notas importantes
+
+- La aplicación depende de `hand_landmarker.task`.
+- El proyecto está diseñado para trabajar con detección visual en tiempo real.
+- La documentación del repositorio menciona algunos atajos adicionales, pero el comportamiento que se debe tomar como referencia es el que implementa el código fuente.
+- Si no hay cámara conectada o el archivo de modelo falta, la aplicación no podrá funcionar correctamente.
+
+## Estructura resumida
+
+```text
+LMS-visor/
+├─ main.py
+├─ camera_engine.py
+├─ hand_processor.py
+├─ gesture_logic.py
+├─ tracker.py
+├─ recorder.py
+├─ pencil.py
+├─ gestures.json
+├─ motion_gestures.json
+├─ hand_landmarker.task
+└─ models/
+```
+
+## Propósito del proyecto
+
+Este programa sirve para:
+- reconocer señas de manera interactiva
+- registrar nuevas muestras
+- entrenar el sistema con datos propios
+- probar detección y seguimiento de manos en tiempo real
+
+## Observación final
+
+La app no es solo un visor de cámara: integra captura, análisis, almacenamiento y entrenamiento en una sola interfaz.
